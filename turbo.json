@@ -1,0 +1,82 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "pipeline": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**/*.ts", "src/**/*.js", "package.json", "tsconfig.json"],
+      "outputs": ["dist/**", "build/**", ".next/**", "!.next/cache/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "inputs": ["src/**/*.ts", "src/**/*.js", "package.json", ".eslintrc.js"],
+      "outputs": []
+    },
+    "lint:fix": {
+      "cache": false,
+      "inputs": ["src/**/*.ts", "src/**/*.js", "package.json", ".eslintrc.js"],
+      "outputs": ["src/**/*.ts", "src/**/*.js"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**/*.ts", "package.json", "tsconfig.json"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "inputs": ["src/**/*.ts", "src/**/*.js", "test/**/*.ts", "test/**/*.js", "package.json"],
+      "outputs": ["coverage/**"],
+      "env": ["NODE_ENV", "DATABASE_URL", "REDIS_URL"]
+    },
+    "test:unit": {
+      "inputs": ["src/**/*.ts", "test/**/*.test.ts", "package.json"],
+      "outputs": ["coverage/**"],
+      "env": ["NODE_ENV"]
+    },
+    "test:integration": {
+      "dependsOn": ["build"],
+      "inputs": ["src/**/*.ts", "test/**/*.integration.ts", "package.json"],
+      "outputs": ["coverage/**"],
+      "env": ["NODE_ENV", "DATABASE_URL", "REDIS_URL"]
+    },
+    "test:e2e": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "inputs": ["src/**/*.ts", "test/**/*.e2e.ts", "package.json"],
+      "outputs": ["coverage/**"],
+      "env": ["NODE_ENV", "DATABASE_URL", "REDIS_URL", "PUBLIC_URL"]
+    },
+    "test:coverage": {
+      "dependsOn": ["test"],
+      "outputs": ["coverage/**"]
+    },
+    "test:security": {
+      "inputs": ["src/**/*.ts", "package.json"],
+      "outputs": []
+    },
+    "db:migrate": {
+      "cache": false,
+      "env": ["DATABASE_URL"]
+    },
+    "db:seed": {
+      "cache": false,
+      "env": ["DATABASE_URL"]
+    },
+    "db:reset": {
+      "cache": false,
+      "env": ["DATABASE_URL"]
+    },
+    "clean": {
+      "cache": false
+    }
+  },
+  "globalDependencies": [
+    "package-lock.json",
+    ".env",
+    ".env.local",
+    "docker-compose.yml",
+    "turbo.json"
+  ]
+}

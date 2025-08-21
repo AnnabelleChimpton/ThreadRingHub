@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    container_name: ringhub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ringhub
+      POSTGRES_USER: ringhub
+      POSTGRES_PASSWORD: development_password_change_in_production
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ringhub -d ringhub"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis cache
+  redis:
+    image: redis:7-alpine
+    container_name: ringhub-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./infra/docker/redis/redis.conf:/etc/redis/redis.conf:ro
+    command: redis-server /etc/redis/redis.conf
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Ring Hub API (development)
+  hub-api:
+    build:
+      context: .
+      dockerfile: ./apps/hub-api/Dockerfile.dev
+      target: development
+    container_name: ringhub-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://ringhub:development_password_change_in_production@postgres:5432/ringhub
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: debug
+      # Development keys - NEVER use in production
+      SIGNING_KEY: "ed25519-development-key-change-in-production"
+      JWT_SECRET: "development-jwt-secret-change-in-production"
+      # Instance configuration
+      INSTANCE_DID: "did:web:localhost:3000"
+      INSTANCE_NAME: "Ring Hub Development"
+      # Feature flags
+      FEDERATION_ENABLED: "false"
+      ACTIVITYPUB_ENABLED: "false"
+      # Security settings (relaxed for development)
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_MAX: 1000
+      CORS_ORIGINS: "*"
+    ports:
+      - "3000:3000"
+      - "9229:9229" # Node.js debugger
+    volumes:
+      - ./apps/hub-api:/app/apps/hub-api
+      - ./packages:/app/packages
+      - /app/node_modules
+      - /app/apps/hub-api/node_modules
+    command: npm run dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Adminer for database management (development only)
+  adminer:
+    image: adminer:4-standalone
+    container_name: ringhub-adminer
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: "dracula"
+
+  # Redis Commander for cache management (development only)  
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: ringhub-redis-commander
+    restart: unless-stopped
+    depends_on:
+      - redis
+    ports:
+      - "8081:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    name: ringhub-network

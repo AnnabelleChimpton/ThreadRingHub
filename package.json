@@ -1,0 +1,93 @@
+{
+  "name": "ring-hub",
+  "version": "0.1.0",
+  "description": "Neutral, protocol-first service for hosting and federating ThreadRings across the web",
+  "keywords": [
+    "threadring",
+    "decentralized",
+    "federation",
+    "community",
+    "protocol",
+    "activitypub"
+  ],
+  "homepage": "https://github.com/yourusername/ring-hub",
+  "bugs": {
+    "url": "https://github.com/yourusername/ring-hub/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/ring-hub.git"
+  },
+  "license": "MIT",
+  "author": "Your Name <your.email@example.com>",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "build:api": "turbo run build --filter=hub-api",
+    "build:sdk": "turbo run build --filter=trp-client",
+    "clean": "turbo run clean && rm -rf node_modules/.cache",
+    "dev": "turbo run dev --parallel",
+    "dev:api": "turbo run dev --filter=hub-api",
+    "dev:watch": "turbo run dev --parallel --watch",
+    "db:migrate": "turbo run db:migrate --filter=hub-api",
+    "db:seed": "turbo run db:seed --filter=hub-api",
+    "db:reset": "turbo run db:reset --filter=hub-api",
+    "docker:build": "docker-compose build",
+    "docker:build:prod": "docker-compose -f docker-compose.prod.yml build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:unit": "turbo run test:unit",
+    "test:integration": "turbo run test:integration",
+    "test:e2e": "turbo run test:e2e",
+    "test:coverage": "turbo run test:coverage",
+    "test:security": "turbo run test:security",
+    "format": "prettier --write \"**/*.{js,ts,tsx,md,json}\"",
+    "format:check": "prettier --check \"**/*.{js,ts,tsx,md,json}\"",
+    "prepare": "husky install",
+    "release": "changeset publish",
+    "version": "changeset version"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.26.2",
+    "@types/node": "^20.8.0",
+    "@typescript-eslint/eslint-plugin": "^6.7.5",
+    "@typescript-eslint/parser": "^6.7.5",
+    "eslint": "^8.51.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-import": "^2.28.1",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-security": "^1.7.1",
+    "husky": "^8.0.3",
+    "lint-staged": "^14.0.1",
+    "prettier": "^3.0.3",
+    "turbo": "^1.10.16",
+    "typescript": "^5.2.2"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "packageManager": "npm@9.8.1",
+  "lint-staged": {
+    "*.{js,ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{md,json}": [
+      "prettier --write"
+    ]
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged",
+      "pre-push": "npm run test:unit && npm run typecheck"
+    }
+  }
+}
