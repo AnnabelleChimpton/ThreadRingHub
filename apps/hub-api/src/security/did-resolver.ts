@@ -86,9 +86,31 @@ async function resolveWebDID(did: string): Promise<DIDDocument | null> {
       return createMockWebDID(did);
     }
 
-    // TODO: Implement actual HTTP fetching
-    logger.info({ url }, 'Would fetch DID document from URL');
-    return null;
+    // Fetch DID document from URL
+    logger.info({ url }, 'Fetching DID document from URL');
+    
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'RingHub-DID-Resolver/1.0',
+        },
+        signal: AbortSignal.timeout(5000), // 5 second timeout
+      });
+
+      if (!response.ok) {
+        logger.warn({ url, status: response.status }, 'Failed to fetch DID document');
+        return null;
+      }
+
+      const document = await response.json() as DIDDocument;
+      logger.info({ url, did: document.id }, 'Successfully fetched DID document');
+      return document;
+    } catch (fetchError) {
+      logger.error({ error: fetchError, url }, 'HTTP fetch failed for DID document');
+      return null;
+    }
   } catch (error) {
     logger.error({ error, did }, 'Failed to resolve did:web');
     return null;
