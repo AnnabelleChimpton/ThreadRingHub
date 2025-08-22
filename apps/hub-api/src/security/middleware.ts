@@ -25,8 +25,11 @@ export async function authenticateActor(
   reply: FastifyReply
 ): Promise<void> {
   try {
+    logger.info({ method: request.method, url: request.url }, 'Authentication middleware called');
+    
     // Skip authentication for public endpoints
     if (isPublicEndpoint(request.url)) {
+      logger.info({ url: request.url }, 'Skipping authentication for public endpoint');
       return;
     }
 
