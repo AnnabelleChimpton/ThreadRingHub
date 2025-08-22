@@ -28,8 +28,8 @@ export async function authenticateActor(
     logger.info({ method: request.method, url: request.url }, 'Authentication middleware called');
     
     // Skip authentication for public endpoints
-    if (isPublicEndpoint(request.url)) {
-      logger.info({ url: request.url }, 'Skipping authentication for public endpoint');
+    if (isPublicEndpoint(request.url, request.method)) {
+      logger.info({ url: request.url, method: request.method }, 'Skipping authentication for public endpoint');
       return;
     }
 
@@ -248,27 +248,35 @@ export function requirePermission(permission: string) {
 /**
  * Check if an endpoint is public (doesn't require authentication)
  */
-function isPublicEndpoint(url: string): boolean {
+function isPublicEndpoint(url: string, method?: string): boolean {
   const publicPaths = [
     '/health',
     '/health/live',
     '/health/ready',
     '/docs',
     '/documentation',
-    // Ring discovery endpoints are public
-    '/trp/rings',
-    '/trp/rings/trending',
-    // Individual ring info is public (but posting requires auth)
   ];
 
-  // Check exact matches
+  // Check exact matches for always-public endpoints
   if (publicPaths.some(path => url === path || url.startsWith(path + '?'))) {
     return true;
   }
 
-  // Check GET requests to ring endpoints (read-only access)
-  if (url.match(/^\/trp\/rings\/[^\/]+$/) && !url.includes('?')) {
-    return true; // GET /trp/rings/{slug} is public
+  // Ring discovery endpoints are public for GET requests only
+  if (method === 'GET') {
+    const getPublicPaths = [
+      '/trp/rings',
+      '/trp/rings/trending',
+    ];
+    
+    if (getPublicPaths.some(path => url === path || url.startsWith(path + '?'))) {
+      return true;
+    }
+    
+    // Individual ring info is public for GET requests
+    if (url.match(/^\/trp\/rings\/[^\/]+$/)) {
+      return true; // GET /trp/rings/{slug} is public
+    }
   }
 
   return false;
@@ -293,7 +301,7 @@ export async function auditLogger(
   reply: FastifyReply
 ): Promise<void> {
   // Skip logging for health checks and docs
-  if (isPublicEndpoint(request.url) && !request.url.startsWith('/trp/')) {
+  if (isPublicEndpoint(request.url, request.method) && !request.url.startsWith('/trp/')) {
     return;
   }
 
