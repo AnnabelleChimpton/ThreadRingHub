@@ -202,8 +202,17 @@ export async function verifyHttpSignature(
   request: FastifyRequest
 ): Promise<VerificationResult> {
   try {
-    // Get signature header
-    const signatureHeader = request.headers['signature'] as string;
+    // Get signature header (can be in 'signature' or 'authorization' header)
+    let signatureHeader = request.headers['signature'] as string;
+    
+    // If not in 'signature' header, check 'authorization' header
+    if (!signatureHeader) {
+      const authHeader = request.headers['authorization'] as string;
+      if (authHeader && authHeader.startsWith('Signature ')) {
+        signatureHeader = authHeader.substring('Signature '.length);
+      }
+    }
+    
     if (!signatureHeader) {
       return { valid: false, error: 'Missing signature header' };
     }
