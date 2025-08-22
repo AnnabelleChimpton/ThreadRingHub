@@ -21,7 +21,8 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx src/database/seed.ts",
     "db:reset": "prisma migrate reset --force",
-    "script:verify-actors": "tsx scripts/verify-actors.ts"
+    "script:verify-actors": "tsx scripts/verify-actors.ts",
+    "script:test-signature": "tsx scripts/test-signature-flow.ts"
   },
   "dependencies": {
     "@fastify/cors": "^8.4.0",
