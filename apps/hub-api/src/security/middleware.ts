@@ -1,0 +1,301 @@
+import { FastifyRequest, FastifyReply } from 'fastify';
+import { verifyHttpSignature } from './http-signature';
+import { getActor, isActorBlocked } from './actor-manager';
+import { logger } from '../utils/logger';
+import { prisma } from '../database/prisma';
+
+// Extend FastifyRequest to include actor information
+declare module 'fastify' {
+  interface FastifyRequest {
+    actor?: {
+      did: string;
+      name?: string;
+      verified: boolean;
+      trusted: boolean;
+    };
+    keyId?: string;
+  }
+}
+
+/**
+ * Middleware to authenticate requests using HTTP signatures
+ */
+export async function authenticateActor(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    // Skip authentication for public endpoints
+    if (isPublicEndpoint(request.url)) {
+      return;
+    }
+
+    // Verify HTTP signature
+    const result = await verifyHttpSignature(request);
+    
+    if (!result.valid) {
+      reply.code(401).send({
+        error: 'Authentication required',
+        message: result.error || 'Invalid or missing signature',
+      });
+      return;
+    }
+
+    // Get actor information
+    if (result.actorDid) {
+      const actor = await getActor(result.actorDid);
+      if (actor) {
+        request.actor = {
+          did: actor.did,
+          name: actor.name || undefined,
+          verified: actor.verified,
+          trusted: actor.trusted,
+        };
+        request.keyId = result.keyId;
+      }
+    }
+  } catch (error) {
+    logger.error({ error }, 'Authentication middleware error');
+    reply.code(500).send({
+      error: 'Internal error',
+      message: 'Authentication failed',
+    });
+  }
+}
+
+/**
+ * Middleware to require verified actors
+ */
+export async function requireVerifiedActor(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<void> {
+  if (!request.actor?.verified) {
+    reply.code(403).send({
+      error: 'Verification required',
+      message: 'This action requires a verified actor',
+    });
+    return;
+  }
+}
+
+/**
+ * Middleware to require trusted actors
+ */
+export async function requireTrustedActor(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<void> {
+  if (!request.actor?.trusted) {
+    reply.code(403).send({
+      error: 'Trust required',
+      message: 'This action requires a trusted actor',
+    });
+    return;
+  }
+}
+
+/**
+ * Middleware to check if actor is blocked from a specific ring
+ */
+export function requireNotBlocked(ringParam: string = 'slug') {
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.actor) {
+      return; // Authentication middleware should handle this
+    }
+
+    const ringSlug = (request.params as any)[ringParam];
+    if (!ringSlug) {
+      reply.code(400).send({
+        error: 'Invalid request',
+        message: 'Ring identifier required',
+      });
+      return;
+    }
+
+    try {
+      // Get ring ID from slug
+      const ring = await prisma.ring.findUnique({
+        where: { slug: ringSlug },
+        select: { id: true },
+      });
+
+      if (!ring) {
+        reply.code(404).send({
+          error: 'Not found',
+          message: 'Ring not found',
+        });
+        return;
+      }
+
+      // Check if actor is blocked
+      const blocked = await isActorBlocked(request.actor.did, ring.id);
+      if (blocked) {
+        reply.code(403).send({
+          error: 'Access denied',
+          message: 'You are blocked from this ring',
+        });
+        return;
+      }
+    } catch (error) {
+      logger.error({ error, ringSlug }, 'Error checking block status');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to check access permissions',
+      });
+    }
+  };
+}
+
+/**
+ * Middleware to check ring membership
+ */
+export function requireMembership(ringParam: string = 'slug') {
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.actor) {
+      return; // Authentication middleware should handle this
+    }
+
+    const ringSlug = (request.params as any)[ringParam];
+    if (!ringSlug) {
+      reply.code(400).send({
+        error: 'Invalid request',
+        message: 'Ring identifier required',
+      });
+      return;
+    }
+
+    try {
+      // Check membership
+      const membership = await prisma.membership.findFirst({
+        where: {
+          ring: { slug: ringSlug },
+          actorDid: request.actor.did,
+          status: 'ACTIVE',
+        },
+        include: {
+          ring: { select: { id: true, name: true } },
+          role: { select: { name: true, permissions: true } },
+        },
+      });
+
+      if (!membership) {
+        reply.code(403).send({
+          error: 'Access denied',
+          message: 'Ring membership required',
+        });
+        return;
+      }
+
+      // Attach membership info to request
+      (request as any).membership = {
+        ringId: membership.ring.id,
+        ringName: membership.ring.name,
+        role: membership.role?.name,
+        permissions: membership.role?.permissions || [],
+      };
+    } catch (error) {
+      logger.error({ error, ringSlug }, 'Error checking membership');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to check membership',
+      });
+    }
+  };
+}
+
+/**
+ * Middleware to check specific permissions
+ */
+export function requirePermission(permission: string) {
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const membership = (request as any).membership;
+    
+    if (!membership) {
+      reply.code(403).send({
+        error: 'Access denied',
+        message: 'Ring membership required',
+      });
+      return;
+    }
+
+    const hasPermission = membership.permissions.includes(permission);
+    if (!hasPermission) {
+      reply.code(403).send({
+        error: 'Insufficient permissions',
+        message: `This action requires the '${permission}' permission`,
+      });
+      return;
+    }
+  };
+}
+
+/**
+ * Check if an endpoint is public (doesn't require authentication)
+ */
+function isPublicEndpoint(url: string): boolean {
+  const publicPaths = [
+    '/health',
+    '/health/live',
+    '/health/ready',
+    '/docs',
+    '/documentation',
+    // Ring discovery endpoints are public
+    '/trp/rings',
+    '/trp/rings/trending',
+    // Individual ring info is public (but posting requires auth)
+  ];
+
+  // Check exact matches
+  if (publicPaths.some(path => url === path || url.startsWith(path + '?'))) {
+    return true;
+  }
+
+  // Check GET requests to ring endpoints (read-only access)
+  if (url.match(/^\/trp\/rings\/[^\/]+$/) && !url.includes('?')) {
+    return true; // GET /trp/rings/{slug} is public
+  }
+
+  return false;
+}
+
+/**
+ * Rate limiting by actor DID
+ */
+export async function actorRateLimit(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<void> {
+  // This would integrate with Redis to track per-actor rate limits
+  // For now, we'll rely on the global rate limiting configured in the main app
+}
+
+/**
+ * Log all actor actions for audit trail
+ */
+export async function auditLogger(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<void> {
+  // Skip logging for health checks and docs
+  if (isPublicEndpoint(request.url) && !request.url.startsWith('/trp/')) {
+    return;
+  }
+
+  const originalSend = reply.send.bind(reply);
+  reply.send = function(payload: any) {
+    // Log the action after response
+    setImmediate(() => {
+      logger.info({
+        method: request.method,
+        url: request.url,
+        actorDid: request.actor?.did,
+        statusCode: reply.statusCode,
+        userAgent: request.headers['user-agent'],
+        ip: request.ip,
+      }, 'Actor action');
+    });
+
+    return originalSend(payload);
+  };
+}

@@ -9,6 +9,7 @@ import { config } from './config';
 import { logger } from './utils/logger';
 import { connectDatabase, disconnectDatabase, checkDatabaseHealth } from './database/prisma';
 import { connectRedis, disconnectRedis, checkRedisHealth } from './database/redis';
+import { ringsRoutes } from './routes/rings';
 
 async function buildApp() {
   const fastify = Fastify({
@@ -99,6 +100,9 @@ async function buildApp() {
       timestamp: new Date().toISOString(),
     };
   });
+
+  // Register API routes
+  await fastify.register(ringsRoutes, { prefix: '/trp' });
 
   // Graceful shutdown
   const closeGracefully = async (signal: string) => {

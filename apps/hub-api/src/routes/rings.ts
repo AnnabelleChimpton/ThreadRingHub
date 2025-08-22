@@ -1,0 +1,1009 @@
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { nanoid } from 'nanoid';
+import { prisma } from '../database/prisma';
+import { logger } from '../utils/logger';
+import { 
+  authenticateActor, 
+  requireVerifiedActor, 
+  requireNotBlocked,
+  requireMembership,
+  requirePermission,
+  auditLogger 
+} from '../security/middleware';
+import {
+  CreateRingSchema,
+  UpdateRingSchema,
+  RingQuerySchema,
+  MemberQuerySchema,
+  TrendingQuerySchema,
+  ForkRingSchema,
+  type CreateRingInput,
+  type UpdateRingInput,
+  type RingQueryInput,
+  type MemberQueryInput,
+  type TrendingQueryInput,
+  type ForkRingInput,
+  type RingResponse,
+  type RingListResponse,
+  type MembersListResponse,
+} from '../schemas/ring-schemas';
+
+/**
+ * Generate a unique slug from ring name
+ */
+function generateSlug(name: string, existingSlugs: string[] = []): string {
+  let baseSlug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .trim();
+
+  if (baseSlug.length === 0) {
+    baseSlug = 'ring';
+  }
+
+  // Ensure uniqueness
+  let slug = baseSlug;
+  let counter = 1;
+  while (existingSlugs.includes(slug)) {
+    slug = `${baseSlug}-${counter}`;
+    counter++;
+  }
+
+  return slug;
+}
+
+/**
+ * Build ring response with computed fields
+ */
+async function buildRingResponse(
+  ring: any,
+  includeLineage = false,
+  includeChildren = false
+): Promise<RingResponse> {
+  const response: RingResponse = {
+    id: ring.id,
+    slug: ring.slug,
+    name: ring.name,
+    description: ring.description,
+    shortCode: ring.shortCode,
+    visibility: ring.visibility,
+    joinPolicy: ring.joinPolicy,
+    postPolicy: ring.postPolicy,
+    ownerDid: ring.ownerDid,
+    parentId: ring.parentId,
+    createdAt: ring.createdAt.toISOString(),
+    updatedAt: ring.updatedAt.toISOString(),
+    curatorNote: ring.curatorNote,
+    metadata: ring.metadata,
+    policies: ring.policies,
+  };
+
+  // Add member count
+  const memberCount = await prisma.membership.count({
+    where: {
+      ringId: ring.id,
+      status: 'ACTIVE',
+    },
+  });
+  response.memberCount = memberCount;
+
+  // Add post count
+  const postCount = await prisma.postRef.count({
+    where: {
+      ringId: ring.id,
+      status: 'ACCEPTED',
+    },
+  });
+  response.postCount = postCount;
+
+  // Add lineage (ancestors)
+  if (includeLineage && ring.parentId) {
+    const lineage = [];
+    let currentRing = ring;
+    
+    while (currentRing.parentId) {
+      const parent = await prisma.ring.findUnique({
+        where: { id: currentRing.parentId },
+        select: { id: true, slug: true, name: true, parentId: true },
+      });
+      
+      if (!parent) break;
+      
+      lineage.unshift({
+        id: parent.id,
+        slug: parent.slug,
+        name: parent.name,
+      });
+      
+      currentRing = parent;
+    }
+    
+    response.lineage = lineage;
+  }
+
+  // Add children
+  if (includeChildren) {
+    const children = await prisma.ring.findMany({
+      where: { parentId: ring.id },
+      select: { id: true, slug: true, name: true },
+    });
+
+    response.children = await Promise.all(
+      children.map(async (child) => {
+        const childMemberCount = await prisma.membership.count({
+          where: {
+            ringId: child.id,
+            status: 'ACTIVE',
+          },
+        });
+
+        return {
+          id: child.id,
+          slug: child.slug,
+          name: child.name,
+          memberCount: childMemberCount,
+        };
+      })
+    );
+  }
+
+  return response;
+}
+
+export async function ringsRoutes(fastify: FastifyInstance) {
+  // Add security middleware to all protected routes
+  fastify.addHook('preHandler', auditLogger);
+
+  /**
+   * GET /trp/rings - List and search rings
+   */
+  fastify.get<{ Querystring: RingQueryInput }>('/rings', {
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: {
+          search: { type: 'string' },
+          visibility: { type: 'string', enum: ['PUBLIC', 'UNLISTED', 'PRIVATE'] },
+          limit: { type: 'number', minimum: 1, maximum: 100, default: 20 },
+          offset: { type: 'number', minimum: 0, default: 0 },
+          sort: { type: 'string', enum: ['created', 'updated', 'name', 'members'], default: 'created' },
+          order: { type: 'string', enum: ['asc', 'desc'], default: 'desc' },
+        },
+      },
+      tags: ['rings'],
+      summary: 'List and search rings',
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            rings: { type: 'array' },
+            total: { type: 'number' },
+            limit: { type: 'number' },
+            offset: { type: 'number' },
+            hasMore: { type: 'boolean' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const { search, visibility, limit, offset, sort, order } = request.query;
+
+      const where: any = {};
+
+      // Only show public rings to unauthenticated users
+      if (!request.actor) {
+        where.visibility = 'PUBLIC';
+      } else if (visibility) {
+        where.visibility = visibility;
+      }
+
+      // Search functionality
+      if (search) {
+        where.OR = [
+          { name: { contains: search, mode: 'insensitive' } },
+          { description: { contains: search, mode: 'insensitive' } },
+          { shortCode: { contains: search, mode: 'insensitive' } },
+        ];
+      }
+
+      // Build order clause
+      const orderBy: any = {};
+      switch (sort) {
+        case 'name':
+          orderBy.name = order;
+          break;
+        case 'updated':
+          orderBy.updatedAt = order;
+          break;
+        case 'members':
+          // This would require a more complex query in production
+          orderBy.createdAt = order;
+          break;
+        default:
+          orderBy.createdAt = order;
+      }
+
+      const [rings, total] = await Promise.all([
+        prisma.ring.findMany({
+          where,
+          take: limit,
+          skip: offset,
+          orderBy,
+        }),
+        prisma.ring.count({ where }),
+      ]);
+
+      const ringResponses = await Promise.all(
+        rings.map(ring => buildRingResponse(ring))
+      );
+
+      const response: RingListResponse = {
+        rings: ringResponses,
+        total,
+        limit,
+        offset,
+        hasMore: offset + limit < total,
+      };
+
+      reply.send(response);
+    } catch (error) {
+      logger.error({ error }, 'Failed to list rings');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to retrieve rings',
+      });
+    }
+  });
+
+  /**
+   * GET /trp/rings/trending - Get trending rings
+   */
+  fastify.get<{ Querystring: TrendingQueryInput }>('/rings/trending', {
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: {
+          timeWindow: { type: 'string', enum: ['hour', 'day', 'week', 'month'], default: 'day' },
+          limit: { type: 'number', minimum: 1, maximum: 50, default: 10 },
+        },
+      },
+      tags: ['rings'],
+      summary: 'Get trending rings',
+    },
+  }, async (request, reply) => {
+    try {
+      const { timeWindow, limit } = request.query;
+
+      // Calculate time cutoff
+      const now = new Date();
+      const cutoff = new Date();
+      switch (timeWindow) {
+        case 'hour':
+          cutoff.setHours(now.getHours() - 1);
+          break;
+        case 'day':
+          cutoff.setDate(now.getDate() - 1);
+          break;
+        case 'week':
+          cutoff.setDate(now.getDate() - 7);
+          break;
+        case 'month':
+          cutoff.setMonth(now.getMonth() - 1);
+          break;
+      }
+
+      // For now, we'll use a simple algorithm based on recent activity
+      // In production, this would be more sophisticated
+      const rings = await prisma.ring.findMany({
+        where: {
+          visibility: 'PUBLIC',
+          updatedAt: { gte: cutoff },
+        },
+        take: limit,
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      const ringResponses = await Promise.all(
+        rings.map(ring => buildRingResponse(ring))
+      );
+
+      reply.send({
+        rings: ringResponses,
+        timeWindow,
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      logger.error({ error }, 'Failed to get trending rings');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to retrieve trending rings',
+      });
+    }
+  });
+
+  /**
+   * GET /trp/rings/:slug - Get ring details
+   */
+  fastify.get<{ Params: { slug: string } }>('/rings/:slug', {
+    schema: {
+      params: {
+        type: 'object',
+        properties: {
+          slug: { type: 'string' },
+        },
+        required: ['slug'],
+      },
+      tags: ['rings'],
+      summary: 'Get ring details',
+    },
+  }, async (request, reply) => {
+    try {
+      const { slug } = request.params;
+
+      const ring = await prisma.ring.findUnique({
+        where: { slug },
+      });
+
+      if (!ring) {
+        reply.code(404).send({
+          error: 'Not found',
+          message: 'Ring not found',
+        });
+        return;
+      }
+
+      // Check visibility permissions
+      if (ring.visibility === 'PRIVATE' && !request.actor) {
+        reply.code(404).send({
+          error: 'Not found',
+          message: 'Ring not found',
+        });
+        return;
+      }
+
+      if (ring.visibility === 'PRIVATE' && request.actor) {
+        // Check if user is a member
+        const membership = await prisma.membership.findFirst({
+          where: {
+            ringId: ring.id,
+            actorDid: request.actor.did,
+            status: 'ACTIVE',
+          },
+        });
+
+        if (!membership) {
+          reply.code(404).send({
+            error: 'Not found',
+            message: 'Ring not found',
+          });
+          return;
+        }
+      }
+
+      const response = await buildRingResponse(ring, true, true);
+      reply.send(response);
+    } catch (error) {
+      logger.error({ error }, 'Failed to get ring details');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to retrieve ring',
+      });
+    }
+  });
+
+  /**
+   * POST /trp/rings - Create a new ring
+   */
+  fastify.post<{ Body: CreateRingInput }>('/rings', {
+    preHandler: [authenticateActor, requireVerifiedActor],
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 100 },
+          description: { type: 'string', maxLength: 500 },
+          shortCode: { type: 'string', minLength: 2, maxLength: 10, pattern: '^[a-zA-Z0-9-]+$' },
+          visibility: { type: 'string', enum: ['PUBLIC', 'UNLISTED', 'PRIVATE'], default: 'PUBLIC' },
+          joinPolicy: { type: 'string', enum: ['OPEN', 'APPLICATION', 'INVITATION', 'CLOSED'], default: 'OPEN' },
+          postPolicy: { type: 'string', enum: ['OPEN', 'MEMBERS', 'CURATED', 'CLOSED'], default: 'OPEN' },
+          parentSlug: { type: 'string' },
+          curatorNote: { type: 'string', maxLength: 1000 },
+          metadata: { type: 'object' },
+          policies: { type: 'object' },
+        },
+        required: ['name'],
+      },
+      tags: ['rings'],
+      summary: 'Create a new ring',
+      security: [{ httpSignature: [] }],
+    },
+  }, async (request, reply) => {
+    try {
+      const data = request.body;
+      const actorDid = request.actor!.did;
+
+      // Check if parent exists (for forks)
+      let parentRing = null;
+      if (data.parentSlug) {
+        parentRing = await prisma.ring.findUnique({
+          where: { slug: data.parentSlug },
+        });
+
+        if (!parentRing) {
+          reply.code(400).send({
+            error: 'Invalid parent',
+            message: 'Parent ring not found',
+          });
+          return;
+        }
+      }
+
+      // Generate unique slug
+      const existingSlugs = await prisma.ring.findMany({
+        select: { slug: true },
+      });
+      const slug = generateSlug(data.name, existingSlugs.map(r => r.slug));
+
+      // Create the ring
+      const ring = await prisma.ring.create({
+        data: {
+          slug,
+          name: data.name,
+          description: data.description,
+          shortCode: data.shortCode,
+          visibility: data.visibility,
+          joinPolicy: data.joinPolicy,
+          postPolicy: data.postPolicy,
+          ownerDid: actorDid,
+          parentId: parentRing?.id,
+          curatorNote: data.curatorNote,
+          metadata: data.metadata,
+          policies: data.policies,
+        },
+      });
+
+      // Create default roles
+      const [ownerRole] = await Promise.all([
+        prisma.ringRole.create({
+          data: {
+            ringId: ring.id,
+            name: 'owner',
+            permissions: [
+              'manage_ring',
+              'manage_members',
+              'manage_roles',
+              'moderate_posts',
+              'update_ring_info',
+              'delete_ring',
+            ],
+          },
+        }),
+        prisma.ringRole.create({
+          data: {
+            ringId: ring.id,
+            name: 'member',
+            permissions: ['submit_posts', 'view_content'],
+          },
+        }),
+      ]);
+
+      // Add owner as member with owner role
+      await prisma.membership.create({
+        data: {
+          ringId: ring.id,
+          actorDid,
+          roleId: ownerRole.id,
+          status: 'ACTIVE',
+        },
+      });
+
+      // Log the action
+      await prisma.auditLog.create({
+        data: {
+          ringId: ring.id,
+          action: 'ring.created',
+          actorDid,
+          metadata: {
+            ringName: ring.name,
+            parentSlug: data.parentSlug,
+          },
+        },
+      });
+
+      logger.info({ 
+        ringSlug: ring.slug, 
+        ownerDid: actorDid,
+        parentSlug: data.parentSlug,
+      }, 'Ring created');
+
+      const response = await buildRingResponse(ring, true, false);
+      reply.code(201).send(response);
+    } catch (error) {
+      logger.error({ error }, 'Failed to create ring');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to create ring',
+      });
+    }
+  });
+
+  /**
+   * PUT /trp/rings/:slug - Update ring
+   */
+  fastify.put<{ Params: { slug: string }; Body: UpdateRingInput }>('/rings/:slug', {
+    preHandler: [
+      authenticateActor,
+      requireVerifiedActor,
+      requireNotBlocked(),
+      requireMembership(),
+      requirePermission('manage_ring'),
+    ],
+    schema: {
+      params: {
+        type: 'object',
+        properties: {
+          slug: { type: 'string' },
+        },
+        required: ['slug'],
+      },
+      body: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 100 },
+          description: { type: 'string', maxLength: 500 },
+          shortCode: { type: 'string', minLength: 2, maxLength: 10, pattern: '^[a-zA-Z0-9-]+$' },
+          visibility: { type: 'string', enum: ['PUBLIC', 'UNLISTED', 'PRIVATE'] },
+          joinPolicy: { type: 'string', enum: ['OPEN', 'APPLICATION', 'INVITATION', 'CLOSED'] },
+          postPolicy: { type: 'string', enum: ['OPEN', 'MEMBERS', 'CURATED', 'CLOSED'] },
+          curatorNote: { type: 'string', maxLength: 1000 },
+          metadata: { type: 'object' },
+          policies: { type: 'object' },
+        },
+      },
+      tags: ['rings'],
+      summary: 'Update ring',
+      security: [{ httpSignature: [] }],
+    },
+  }, async (request, reply) => {
+    try {
+      const { slug } = request.params;
+      const data = request.body;
+      const actorDid = request.actor!.did;
+
+      const ring = await prisma.ring.findUnique({
+        where: { slug },
+      });
+
+      if (!ring) {
+        reply.code(404).send({
+          error: 'Not found',
+          message: 'Ring not found',
+        });
+        return;
+      }
+
+      // Update the ring
+      const updatedRing = await prisma.ring.update({
+        where: { slug },
+        data: {
+          name: data.name,
+          description: data.description,
+          shortCode: data.shortCode,
+          visibility: data.visibility,
+          joinPolicy: data.joinPolicy,
+          postPolicy: data.postPolicy,
+          curatorNote: data.curatorNote,
+          metadata: data.metadata,
+          policies: data.policies,
+          updatedAt: new Date(),
+        },
+      });
+
+      // Log the action
+      await prisma.auditLog.create({
+        data: {
+          ringId: ring.id,
+          action: 'ring.updated',
+          actorDid,
+          metadata: {
+            changes: data,
+          },
+        },
+      });
+
+      logger.info({ 
+        ringSlug: slug, 
+        updatedBy: actorDid,
+      }, 'Ring updated');
+
+      const response = await buildRingResponse(updatedRing, true, true);
+      reply.send(response);
+    } catch (error) {
+      logger.error({ error }, 'Failed to update ring');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to update ring',
+      });
+    }
+  });
+
+  /**
+   * DELETE /trp/rings/:slug - Delete ring (soft delete)
+   */
+  fastify.delete<{ Params: { slug: string } }>('/rings/:slug', {
+    preHandler: [
+      authenticateActor,
+      requireVerifiedActor,
+      requireNotBlocked(),
+      requireMembership(),
+      requirePermission('delete_ring'),
+    ],
+    schema: {
+      params: {
+        type: 'object',
+        properties: {
+          slug: { type: 'string' },
+        },
+        required: ['slug'],
+      },
+      tags: ['rings'],
+      summary: 'Delete ring',
+      security: [{ httpSignature: [] }],
+    },
+  }, async (request, reply) => {
+    try {
+      const { slug } = request.params;
+      const actorDid = request.actor!.did;
+
+      const ring = await prisma.ring.findUnique({
+        where: { slug },
+      });
+
+      if (!ring) {
+        reply.code(404).send({
+          error: 'Not found',
+          message: 'Ring not found',
+        });
+        return;
+      }
+
+      // For now, we'll do a hard delete
+      // In production, implement soft delete
+      await prisma.ring.delete({
+        where: { slug },
+      });
+
+      logger.info({ 
+        ringSlug: slug, 
+        deletedBy: actorDid,
+      }, 'Ring deleted');
+
+      reply.code(204).send();
+    } catch (error) {
+      logger.error({ error }, 'Failed to delete ring');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to delete ring',
+      });
+    }
+  });
+
+  /**
+   * POST /trp/fork - Fork a ring
+   */
+  fastify.post<{ Body: ForkRingInput & { parentSlug: string } }>('/fork', {
+    preHandler: [authenticateActor, requireVerifiedActor],
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          parentSlug: { type: 'string' },
+          name: { type: 'string' },
+          description: { type: 'string' },
+          shortCode: { type: 'string' },
+          visibility: { type: 'string', enum: ['PUBLIC', 'UNLISTED', 'PRIVATE'] },
+          joinPolicy: { type: 'string', enum: ['OPEN', 'APPLICATION', 'INVITATION', 'CLOSED'] },
+          postPolicy: { type: 'string', enum: ['OPEN', 'MEMBERS', 'CURATED', 'CLOSED'] },
+          curatorNote: { type: 'string' },
+          metadata: { type: 'object' },
+        },
+        required: ['parentSlug', 'name'],
+      },
+      tags: ['rings'],
+      summary: 'Fork a ring',
+      security: [{ httpSignature: [] }],
+    },
+  }, async (request, reply) => {
+    try {
+      const data = request.body;
+      const actorDid = request.actor!.did;
+
+      // Get parent ring
+      const parentRing = await prisma.ring.findUnique({
+        where: { slug: data.parentSlug },
+      });
+
+      if (!parentRing) {
+        reply.code(404).send({
+          error: 'Not found',
+          message: 'Parent ring not found',
+        });
+        return;
+      }
+
+      // Generate unique slug
+      const existingSlugs = await prisma.ring.findMany({
+        select: { slug: true },
+      });
+      const slug = generateSlug(data.name, existingSlugs.map(r => r.slug));
+
+      // Create the fork
+      const ring = await prisma.ring.create({
+        data: {
+          slug,
+          name: data.name,
+          description: data.description,
+          shortCode: data.shortCode,
+          visibility: data.visibility,
+          joinPolicy: data.joinPolicy,
+          postPolicy: data.postPolicy,
+          ownerDid: actorDid,
+          parentId: parentRing.id,
+          curatorNote: data.curatorNote,
+          metadata: {
+            ...data.metadata,
+            forkedFrom: parentRing.slug,
+            forkedAt: new Date().toISOString(),
+          },
+        },
+      });
+
+      // Create default roles (copy from parent if desired)
+      const ownerRole = await prisma.ringRole.create({
+        data: {
+          ringId: ring.id,
+          name: 'owner',
+          permissions: [
+            'manage_ring',
+            'manage_members',
+            'manage_roles',
+            'moderate_posts',
+            'update_ring_info',
+            'delete_ring',
+          ],
+        },
+      });
+
+      // Add owner as member
+      await prisma.membership.create({
+        data: {
+          ringId: ring.id,
+          actorDid,
+          roleId: ownerRole.id,
+          status: 'ACTIVE',
+        },
+      });
+
+      // Log the fork
+      await prisma.auditLog.create({
+        data: {
+          ringId: ring.id,
+          action: 'ring.forked',
+          actorDid,
+          metadata: {
+            parentSlug: parentRing.slug,
+            parentId: parentRing.id,
+          },
+        },
+      });
+
+      logger.info({ 
+        ringSlug: ring.slug, 
+        parentSlug: parentRing.slug,
+        forkedBy: actorDid,
+      }, 'Ring forked');
+
+      const response = await buildRingResponse(ring, true, false);
+      reply.code(201).send(response);
+    } catch (error) {
+      logger.error({ error }, 'Failed to fork ring');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to fork ring',
+      });
+    }
+  });
+
+  /**
+   * GET /trp/rings/:slug/lineage - Get ring genealogy
+   */
+  fastify.get<{ Params: { slug: string } }>('/rings/:slug/lineage', {
+    schema: {
+      params: {
+        type: 'object',
+        properties: {
+          slug: { type: 'string' },
+        },
+        required: ['slug'],
+      },
+      tags: ['rings'],
+      summary: 'Get ring genealogy',
+    },
+  }, async (request, reply) => {
+    try {
+      const { slug } = request.params;
+
+      const ring = await prisma.ring.findUnique({
+        where: { slug },
+      });
+
+      if (!ring) {
+        reply.code(404).send({
+          error: 'Not found',
+          message: 'Ring not found',
+        });
+        return;
+      }
+
+      // Build complete genealogy
+      const ancestors = [];
+      let currentRing = ring;
+      
+      while (currentRing.parentId) {
+        const parent = await prisma.ring.findUnique({
+          where: { id: currentRing.parentId },
+        });
+        
+        if (!parent) break;
+        
+        ancestors.unshift(await buildRingResponse(parent));
+        currentRing = parent;
+      }
+
+      // Get all descendants
+      async function getDescendants(ringId: string): Promise<any[]> {
+        const children = await prisma.ring.findMany({
+          where: { parentId: ringId },
+        });
+
+        const descendants = await Promise.all(
+          children.map(async (child) => {
+            const childDescendants = await getDescendants(child.id);
+            return {
+              ...await buildRingResponse(child),
+              children: childDescendants,
+            };
+          })
+        );
+
+        return descendants;
+      }
+
+      const descendants = await getDescendants(ring.id);
+
+      reply.send({
+        ring: await buildRingResponse(ring),
+        ancestors,
+        descendants,
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      logger.error({ error }, 'Failed to get ring lineage');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to retrieve ring lineage',
+      });
+    }
+  });
+
+  /**
+   * GET /trp/rings/:slug/members - Get ring members
+   */
+  fastify.get<{ 
+    Params: { slug: string }; 
+    Querystring: MemberQueryInput 
+  }>('/rings/:slug/members', {
+    schema: {
+      params: {
+        type: 'object',
+        properties: {
+          slug: { type: 'string' },
+        },
+        required: ['slug'],
+      },
+      querystring: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', minimum: 1, maximum: 100, default: 20 },
+          offset: { type: 'number', minimum: 0, default: 0 },
+          status: { type: 'string', enum: ['PENDING', 'ACTIVE', 'SUSPENDED', 'REVOKED'] },
+          role: { type: 'string' },
+        },
+      },
+      tags: ['rings'],
+      summary: 'Get ring members',
+    },
+  }, async (request, reply) => {
+    try {
+      const { slug } = request.params;
+      const { limit, offset, status, role } = request.query;
+
+      const ring = await prisma.ring.findUnique({
+        where: { slug },
+      });
+
+      if (!ring) {
+        reply.code(404).send({
+          error: 'Not found',
+          message: 'Ring not found',
+        });
+        return;
+      }
+
+      // Check if ring is private and user has access
+      if (ring.visibility === 'PRIVATE' && !request.actor) {
+        reply.code(404).send({
+          error: 'Not found',
+          message: 'Ring not found',
+        });
+        return;
+      }
+
+      const where: any = { ringId: ring.id };
+      if (status) where.status = status;
+      if (role) {
+        where.role = { name: role };
+      }
+
+      const [memberships, total] = await Promise.all([
+        prisma.membership.findMany({
+          where,
+          include: {
+            role: { select: { name: true } },
+          },
+          take: limit,
+          skip: offset,
+          orderBy: { joinedAt: 'desc' },
+        }),
+        prisma.membership.count({ where }),
+      ]);
+
+      // Get actor names
+      const actorDids = memberships.map(m => m.actorDid);
+      const actors = await prisma.actor.findMany({
+        where: { did: { in: actorDids } },
+        select: { did: true, name: true },
+      });
+
+      const actorNameMap = new Map(actors.map(a => [a.did, a.name]));
+
+      const members = memberships.map(m => ({
+        actorDid: m.actorDid,
+        actorName: actorNameMap.get(m.actorDid) || null,
+        status: m.status,
+        role: m.role?.name || null,
+        joinedAt: m.joinedAt.toISOString(),
+        badgeId: m.badgeId,
+      }));
+
+      const response: MembersListResponse = {
+        members,
+        total,
+        limit,
+        offset,
+        hasMore: offset + limit < total,
+      };
+
+      reply.send(response);
+    } catch (error) {
+      logger.error({ error }, 'Failed to get ring members');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to retrieve ring members',
+      });
+    }
+  });
+}
