@@ -1,6 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { verifyHttpSignature } from './http-signature';
-import { getActor, isActorBlocked } from './actor-manager';
+import { getActor, isActorBlocked, registerActor } from './actor-manager';
 import { logger } from '../utils/logger';
 import { prisma } from '../database/prisma';
 
@@ -41,9 +41,21 @@ export async function authenticateActor(
       return;
     }
 
-    // Get actor information
+    // Get or register actor information
     if (result.actorDid) {
-      const actor = await getActor(result.actorDid);
+      let actor = await getActor(result.actorDid);
+      
+      // If actor doesn't exist, register them
+      if (!actor) {
+        logger.info({ did: result.actorDid }, 'Registering new actor during authentication');
+        
+        actor = await registerActor({
+          did: result.actorDid,
+          type: 'USER', // Default to USER type, can be updated later if needed
+          publicKey: result.publicKey, // From HTTP signature verification
+        });
+      }
+      
       if (actor) {
         request.actor = {
           did: actor.did,
