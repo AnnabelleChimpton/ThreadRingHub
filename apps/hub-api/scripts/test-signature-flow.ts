@@ -7,8 +7,12 @@
 
 import * as ed from '@noble/ed25519';
 import { sha256 } from '@noble/hashes/sha256';
+import { sha512 } from '@noble/hashes/sha512';
 import { verifyHttpSignature } from '../src/security/http-signature';
 import { resolveDID, extractPublicKey } from '../src/security/did-resolver';
+
+// Configure SHA-512 for @noble/ed25519
+ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
 
 // Base58 encoding (same as your client)
 const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
