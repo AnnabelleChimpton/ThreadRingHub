@@ -26,6 +26,82 @@ export interface Service {
 }
 
 /**
+ * Convert multibase-encoded key to base64
+ * Ed25519 multibase keys start with 'z' followed by base58btc-encoded bytes
+ */
+function convertMultibaseToBase64(multibaseKey: string): string | null {
+  try {
+    if (!multibaseKey.startsWith('z')) {
+      logger.warn({ multibaseKey }, 'Unsupported multibase encoding (not base58btc)');
+      return null;
+    }
+
+    // Remove the 'z' prefix and decode from base58btc
+    const base58Key = multibaseKey.substring(1);
+    
+    // For Ed25519 keys, the multibase encoding includes a multicodec prefix
+    // Ed25519 public keys are prefixed with 0xed01 (multicodec for ed25519-pub)
+    const keyBytes = base58ToBytes(base58Key);
+    
+    if (keyBytes.length < 34) {
+      logger.warn({ multibaseKey, length: keyBytes.length }, 'Key too short for Ed25519');
+      return null;
+    }
+    
+    // Skip the multicodec prefix (0xed01) and extract the 32-byte key
+    const publicKeyBytes = keyBytes.slice(2);
+    
+    if (publicKeyBytes.length !== 32) {
+      logger.warn({ multibaseKey, keyLength: publicKeyBytes.length }, 'Invalid Ed25519 key length');
+      return null;
+    }
+    
+    return Buffer.from(publicKeyBytes).toString('base64');
+  } catch (error) {
+    logger.error({ error, multibaseKey }, 'Failed to convert multibase to base64');
+    return null;
+  }
+}
+
+/**
+ * Simple base58 decoder (Bitcoin alphabet)
+ */
+function base58ToBytes(base58: string): Uint8Array {
+  const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const ALPHABET_MAP: { [key: string]: number } = {};
+  for (let i = 0; i < ALPHABET.length; i++) {
+    ALPHABET_MAP[ALPHABET[i]] = i;
+  }
+
+  let num = 0n;
+  let multi = 1n;
+  
+  for (let i = base58.length - 1; i >= 0; i--) {
+    const char = base58[i];
+    if (!(char in ALPHABET_MAP)) {
+      throw new Error(`Invalid base58 character: ${char}`);
+    }
+    num += BigInt(ALPHABET_MAP[char]) * multi;
+    multi *= 58n;
+  }
+
+  // Convert to bytes
+  const bytes: number[] = [];
+  while (num > 0) {
+    bytes.unshift(Number(num % 256n));
+    num = num / 256n;
+  }
+
+  // Handle leading zeros
+  let leadingZeros = 0;
+  for (let i = 0; i < base58.length && base58[i] === '1'; i++) {
+    leadingZeros++;
+  }
+  
+  return new Uint8Array([...Array(leadingZeros).fill(0), ...bytes]);
+}
+
+/**
  * Resolve a DID to its document
  */
 export async function resolveDID(did: string): Promise<DIDDocument | null> {
@@ -221,9 +297,8 @@ export function extractPublicKey(
     }
 
     if (method.publicKeyMultibase) {
-      // Convert multibase to base64 if needed
-      // For now, return as-is
-      return method.publicKeyMultibase;
+      // Convert multibase to base64
+      return convertMultibaseToBase64(method.publicKeyMultibase);
     }
 
     return null;
