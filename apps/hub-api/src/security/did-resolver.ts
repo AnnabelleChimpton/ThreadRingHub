@@ -38,13 +38,27 @@ function convertMultibaseToBase64(multibaseKey: string): string | null {
 
     // Remove the 'z' prefix and decode from base58btc
     const base58Key = multibaseKey.substring(1);
+    logger.info({ base58Key }, 'Decoding base58 key');
     
     // For Ed25519 keys, the multibase encoding includes a multicodec prefix
     // Ed25519 public keys are prefixed with 0xed01 (multicodec for ed25519-pub)
     const keyBytes = base58ToBytes(base58Key);
+    logger.info({ 
+      totalBytes: keyBytes.length, 
+      firstTwoBytes: Array.from(keyBytes.slice(0, 2)).map(b => '0x' + b.toString(16))
+    }, 'Decoded key bytes');
     
     if (keyBytes.length < 34) {
       logger.warn({ multibaseKey, length: keyBytes.length }, 'Key too short for Ed25519');
+      return null;
+    }
+    
+    // Verify multicodec prefix (0xed01)
+    if (keyBytes[0] !== 0xed || keyBytes[1] !== 0x01) {
+      logger.warn({ 
+        multibaseKey, 
+        prefix: Array.from(keyBytes.slice(0, 2)).map(b => '0x' + b.toString(16))
+      }, 'Invalid multicodec prefix for Ed25519');
       return null;
     }
     
@@ -56,7 +70,9 @@ function convertMultibaseToBase64(multibaseKey: string): string | null {
       return null;
     }
     
-    return Buffer.from(publicKeyBytes).toString('base64');
+    const base64Key = Buffer.from(publicKeyBytes).toString('base64');
+    logger.info({ base64Key }, 'Successfully converted to base64');
+    return base64Key;
   } catch (error) {
     logger.error({ error, multibaseKey }, 'Failed to convert multibase to base64');
     return null;
@@ -298,7 +314,13 @@ export function extractPublicKey(
 
     if (method.publicKeyMultibase) {
       // Convert multibase to base64
-      return convertMultibaseToBase64(method.publicKeyMultibase);
+      const converted = convertMultibaseToBase64(method.publicKeyMultibase);
+      logger.info({ 
+        original: method.publicKeyMultibase, 
+        converted,
+        success: !!converted 
+      }, 'Converting multibase key to base64');
+      return converted;
     }
 
     return null;
