@@ -20,7 +20,8 @@
     "test:security": "npm audit && snyk test",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx src/database/seed.ts",
-    "db:reset": "prisma migrate reset --force"
+    "db:reset": "prisma migrate reset --force",
+    "script:verify-actors": "tsx scripts/verify-actors.ts"
   },
   "dependencies": {
     "@fastify/cors": "^8.4.0",
