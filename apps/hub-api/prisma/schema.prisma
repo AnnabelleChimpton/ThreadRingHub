@@ -1,0 +1,305 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Core Ring entity
+model Ring {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  name        String
+  description String?
+  shortCode   String?  @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Ring metadata
+  visibility  RingVisibility @default(PUBLIC)
+  joinPolicy  JoinPolicy    @default(OPEN)
+  postPolicy  PostPolicy    @default(OPEN)
+  
+  // Ownership and moderation
+  ownerDid    String
+  
+  // Genealogy
+  parentId    String?
+  parent      Ring?    @relation("RingLineage", fields: [parentId], references: [id])
+  children    Ring[]   @relation("RingLineage")
+  
+  // Metadata JSON fields
+  metadata    Json?    // Additional ring metadata
+  policies    Json?    // Ring-specific policies
+  curatorNote String?  // Curator's description/rules
+  
+  // Relations
+  roles       RingRole[]
+  memberships Membership[]
+  postRefs    PostRef[]
+  auditLogs   AuditLog[]
+  badges      Badge[]
+  challenges  Challenge[]
+  blocks      Block[]
+  
+  @@index([slug])
+  @@index([ownerDid])
+  @@index([parentId])
+  @@index([visibility])
+  @@index([createdAt])
+}
+
+// Ring visibility levels
+enum RingVisibility {
+  PUBLIC      // Discoverable by anyone
+  UNLISTED    // Accessible by direct link only
+  PRIVATE     // Members only
+}
+
+// Join policies
+enum JoinPolicy {
+  OPEN        // Anyone can join
+  APPLICATION // Requires approval
+  INVITATION  // Invitation only
+  CLOSED      // No new members
+}
+
+// Post submission policies
+enum PostPolicy {
+  OPEN        // Anyone can submit
+  MEMBERS     // Members only
+  CURATED     // Requires curator approval
+  CLOSED      // No submissions
+}
+
+// Role definitions for ring members
+model RingRole {
+  id        String   @id @default(uuid())
+  ringId    String
+  ring      Ring     @relation(fields: [ringId], references: [id], onDelete: Cascade)
+  name      String
+  permissions Json   // Array of permission strings
+  createdAt DateTime @default(now())
+  
+  members   Membership[]
+  
+  @@unique([ringId, name])
+  @@index([ringId])
+}
+
+// Membership in a ring
+model Membership {
+  id        String   @id @default(uuid())
+  ringId    String
+  ring      Ring     @relation(fields: [ringId], references: [id], onDelete: Cascade)
+  actorDid  String   // DID of the member
+  roleId    String?
+  role      RingRole? @relation(fields: [roleId], references: [id])
+  
+  status    MembershipStatus @default(PENDING)
+  joinedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Badge reference
+  badgeId   String?  @unique
+  badge     Badge?   @relation(fields: [badgeId], references: [id])
+  
+  // Metadata
+  metadata  Json?    // Platform-specific data
+  
+  @@unique([ringId, actorDid])
+  @@index([ringId])
+  @@index([actorDid])
+  @@index([status])
+}
+
+enum MembershipStatus {
+  PENDING   // Awaiting approval
+  ACTIVE    // Active member
+  SUSPENDED // Temporarily suspended
+  REVOKED   // Membership revoked
+}
+
+// Badge for verified membership
+model Badge {
+  id          String   @id @default(uuid())
+  ringId      String
+  ring        Ring     @relation(fields: [ringId], references: [id], onDelete: Cascade)
+  membership  Membership?
+  
+  // Badge content
+  issuedTo    String   // DID of recipient
+  issuedAt    DateTime @default(now())
+  expiresAt   DateTime?
+  
+  // Cryptographic proof
+  signature   String   // Signature of badge content
+  publicKey   String   // Public key used for signature
+  
+  // Visual representation
+  imageUrl    String?  // Optional 88x31 badge image
+  metadata    Json?    // Additional badge metadata
+  
+  @@index([ringId])
+  @@index([issuedTo])
+}
+
+// Reference to external content
+model PostRef {
+  id        String   @id @default(uuid())
+  ringId    String
+  ring      Ring     @relation(fields: [ringId], references: [id], onDelete: Cascade)
+  
+  // Content reference
+  actorDid  String   // DID of content author
+  uri       String   // URI of the content
+  digest    String   // Content digest/hash
+  
+  // Submission metadata
+  submittedAt DateTime @default(now())
+  submittedBy String   // DID of submitter (may differ from author)
+  
+  // Moderation status
+  status    PostStatus @default(PENDING)
+  moderatedAt DateTime?
+  moderatedBy String?  // DID of moderator
+  moderationNote String?
+  
+  // Additional metadata
+  metadata  Json?     // Platform-specific data
+  pinned    Boolean   @default(false)
+  
+  @@unique([ringId, uri])
+  @@index([ringId])
+  @@index([actorDid])
+  @@index([status])
+  @@index([submittedAt])
+}
+
+enum PostStatus {
+  PENDING   // Awaiting moderation
+  ACCEPTED  // Accepted into ring
+  REJECTED  // Rejected by moderator
+  REMOVED   // Removed after acceptance
+}
+
+// Challenge/prompt for a ring
+model Challenge {
+  id        String   @id @default(uuid())
+  ringId    String
+  ring      Ring     @relation(fields: [ringId], references: [id], onDelete: Cascade)
+  
+  title     String
+  prompt    String   // The challenge prompt/question
+  createdBy String   // DID of creator
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+  
+  active    Boolean  @default(true)
+  metadata  Json?    // Additional challenge data
+  
+  @@index([ringId])
+  @@index([active])
+}
+
+// Block list for rings
+model Block {
+  id        String   @id @default(uuid())
+  ringId    String
+  ring      Ring     @relation(fields: [ringId], references: [id], onDelete: Cascade)
+  
+  targetDid String   // DID of blocked actor/instance
+  targetType BlockType
+  reason    String?
+  blockedAt DateTime @default(now())
+  blockedBy String   // DID of blocker
+  
+  @@unique([ringId, targetDid])
+  @@index([ringId])
+  @@index([targetDid])
+}
+
+enum BlockType {
+  USER      // Individual user
+  INSTANCE  // Entire instance/domain
+  ACTOR     // Any actor type
+}
+
+// Audit log for all ring actions
+model AuditLog {
+  id        String   @id @default(uuid())
+  ringId    String
+  ring      Ring     @relation(fields: [ringId], references: [id], onDelete: Cascade)
+  
+  action    String   // Action type (join, leave, post, moderate, etc.)
+  actorDid  String   // Who performed the action
+  targetDid String?  // Who/what was affected
+  
+  metadata  Json?    // Action-specific data
+  timestamp DateTime @default(now())
+  
+  // HTTP signature for verification
+  signature String?
+  publicKey String?
+  
+  @@index([ringId])
+  @@index([actorDid])
+  @@index([action])
+  @@index([timestamp])
+}
+
+// HTTP signatures for request verification
+model HttpSignature {
+  id        String   @id @default(uuid())
+  keyId     String   @unique // Key identifier from signature
+  publicKey String   // Actual public key
+  actorDid  String   // Associated DID
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lastUsed  DateTime?
+  
+  // Trust level for this key
+  trusted   Boolean  @default(false)
+  
+  @@index([actorDid])
+  @@index([trusted])
+}
+
+// Known actors and their metadata
+model Actor {
+  id        String   @id @default(uuid())
+  did       String   @unique // Decentralized identifier
+  
+  // Actor metadata
+  name      String?
+  type      ActorType
+  instanceUrl String? // Home instance URL
+  publicKey String?  // Primary public key
+  
+  // Trust and verification
+  verified  Boolean  @default(false)
+  trusted   Boolean  @default(false)
+  
+  // Timestamps
+  discoveredAt DateTime @default(now())
+  lastSeenAt   DateTime @default(now())
+  
+  // Cached data
+  metadata  Json?    // Platform-specific actor data
+  
+  @@index([type])
+  @@index([verified])
+  @@index([trusted])
+}
+
+enum ActorType {
+  USER      // Individual user
+  SERVICE   // Service/bot account
+  INSTANCE  // Instance/server actor
+}

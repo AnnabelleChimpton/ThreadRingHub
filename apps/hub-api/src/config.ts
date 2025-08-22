@@ -1,4 +1,8 @@
+import { config as loadEnv } from 'dotenv';
 import { z } from 'zod';
+
+// Load environment variables from .env file
+loadEnv();
 
 const configSchema = z.object({
   env: z.enum(['development', 'test', 'production']).default('development'),
@@ -11,6 +15,7 @@ const configSchema = z.object({
     url: z.string().url().or(z.string().startsWith('postgresql://')),
   }),
   redis: z.object({
+    url: z.string().default('redis://localhost:6379'),
     host: z.string().default('localhost'),
     port: z.number().int().default(6379),
     password: z.string().optional(),
@@ -33,6 +38,7 @@ function loadConfig() {
       url: process.env.DATABASE_URL || 'postgresql://ringhub:ringhub@localhost:5432/ringhub',
     },
     redis: {
+      url: process.env.REDIS_URL || 'redis://localhost:6379',
       host: process.env.REDIS_HOST || 'localhost',
       port: parseInt(process.env.REDIS_PORT || '6379', 10),
       password: process.env.REDIS_PASSWORD,

@@ -110,3 +110,7 @@ docs/api/generated/
 # Security
 private/
 secrets/
+
+THREADSTEAD_EXAMPLES/
+.claude/
+docker-compose.yml
