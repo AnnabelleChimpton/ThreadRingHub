@@ -3,6 +3,7 @@ import { sha256 } from '@noble/hashes/sha256';
 import { FastifyRequest } from 'fastify';
 import { prisma } from '../database/prisma';
 import { logger } from '../utils/logger';
+import { resolveDID, extractPublicKey } from './did-resolver';
 
 interface SignatureComponents {
   keyId: string;
@@ -17,6 +18,7 @@ interface VerificationResult {
   valid: boolean;
   actorDid?: string;
   keyId?: string;
+  publicKey?: string;
   error?: string;
 }
 
@@ -159,10 +161,33 @@ async function fetchPublicKey(keyId: string): Promise<string | null> {
       return cached.publicKey;
     }
     
-    // If keyId is a URL, we could fetch it (e.g., from a did:web document)
-    // For now, we'll just return null if not found
-    // In production, this would fetch from the DID document
+    // Extract DID from keyId (format: "did:web:domain.com#key-1")
+    const did = keyId.split('#')[0];
+    if (did.startsWith('did:web:')) {
+      logger.info({ keyId, did }, 'Resolving DID for unknown key');
+      
+      // Resolve DID document to get public key
+      const didDocument = await resolveDID(did);
+      if (didDocument) {
+        const publicKey = extractPublicKey(didDocument);
+        if (publicKey) {
+          // Cache the key for future use
+          await prisma.httpSignature.create({
+            data: {
+              keyId,
+              publicKey,
+              actorDid: did,
+              trusted: false, // Keys start untrusted
+            },
+          });
+          
+          logger.info({ keyId, did }, 'Cached public key from DID resolution');
+          return publicKey;
+        }
+      }
+    }
     
+    logger.warn({ keyId }, 'Failed to resolve public key');
     return null;
   } catch (error) {
     logger.error({ error, keyId }, 'Failed to fetch public key');
@@ -238,8 +263,9 @@ export async function verifyHttpSignature(
     
     return {
       valid: true,
-      actorDid: key?.actorDid,
+      actorDid: key?.actorDid || components.keyId.split('#')[0], // Extract DID from keyId if not in cache
       keyId: components.keyId,
+      publicKey: publicKey,
     };
   } catch (error) {
     logger.error({ error }, 'HTTP signature verification failed');
