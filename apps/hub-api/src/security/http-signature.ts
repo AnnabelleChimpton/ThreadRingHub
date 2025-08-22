@@ -103,10 +103,19 @@ function buildSigningString(
       const expires = Math.floor(Date.now() / 1000) + 300; // 5 minutes
       lines.push(`(expires): ${expires}`);
     } else if (header === 'digest') {
-      // Special case: body digest
-      const body = JSON.stringify(request.body || '');
-      const digest = Buffer.from(sha256(body)).toString('base64');
-      lines.push(`digest: SHA-256=${digest}`);
+      // Use the digest header from the request (already calculated by client)
+      const value = request.headers['digest'];
+      if (value) {
+        lines.push(`digest: ${value}`);
+        logger.info({ digestFromHeader: value }, 'Using digest from request header');
+      } else {
+        // Fallback: calculate digest
+        const body = JSON.stringify(request.body || '');
+        const digest = Buffer.from(sha256(body)).toString('base64');
+        const digestHeader = `sha-256=${digest}`;
+        lines.push(`digest: ${digestHeader}`);
+        logger.info({ body, digest, digestHeader }, 'Calculated digest fallback');
+      }
     } else {
       // Regular header
       const value = request.headers[header.toLowerCase()];
@@ -257,6 +266,12 @@ export async function verifyHttpSignature(
     
     // Build signing string
     const signingString = buildSigningString(request, components.headers);
+    logger.info({ 
+      signingString, 
+      publicKey: publicKey.substring(0, 16) + '...',
+      signature: components.signature.substring(0, 16) + '...',
+      headers: components.headers 
+    }, 'Verifying signature with details');
     
     // Verify signature
     const valid = await verifyEd25519Signature(
