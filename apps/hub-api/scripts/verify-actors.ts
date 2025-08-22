@@ -110,9 +110,9 @@ async function verifyAllUnverifiedActors(dryRun: boolean, limit: number): Promis
   
   const unverifiedActors = await prisma.actor.findMany({
     where: { verified: false },
-    select: { did: true, name: true, createdAt: true },
+    select: { did: true, name: true, discoveredAt: true },
     take: limit,
-    orderBy: { createdAt: 'desc' },
+    orderBy: { discoveredAt: 'desc' },
   });
 
   if (unverifiedActors.length === 0) {
