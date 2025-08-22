@@ -43,9 +43,9 @@ model Ring {
   memberships Membership[]
   postRefs    PostRef[]
   auditLogs   AuditLog[]
-  badges      Badge[]
   challenges  Challenge[]
   blocks      Block[]
+  invitations Invitation[]
   
   @@index([slug])
   @@index([ownerDid])
@@ -102,17 +102,22 @@ model Membership {
   role      RingRole? @relation(fields: [roleId], references: [id])
   
   status    MembershipStatus @default(PENDING)
-  joinedAt  DateTime @default(now())
+  joinedAt  DateTime?
+  leftAt    DateTime?
   updatedAt DateTime @updatedAt
   
-  // Badge reference
+  // Application/leave details
+  applicationMessage String? // Message when applying to join
+  leaveReason       String? // Reason for leaving
+  
+  // Badge relation (one-to-one)
   badgeId   String?  @unique
-  badge     Badge?   @relation(fields: [badgeId], references: [id])
+  badge     Badge?
   
   // Metadata
   metadata  Json?    // Platform-specific data
   
-  @@unique([ringId, actorDid])
+  @@unique([ringId, actorDid], name: "ringId_actorDid")
   @@index([ringId])
   @@index([actorDid])
   @@index([status])
@@ -127,26 +132,20 @@ enum MembershipStatus {
 
 // Badge for verified membership
 model Badge {
-  id          String   @id @default(uuid())
-  ringId      String
-  ring        Ring     @relation(fields: [ringId], references: [id], onDelete: Cascade)
-  membership  Membership?
+  id            String   @id // Badge ID from badge data
+  membershipId  String   @unique
+  membership    Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
   
-  // Badge content
-  issuedTo    String   // DID of recipient
-  issuedAt    DateTime @default(now())
-  expiresAt   DateTime?
+  // Badge content (JSON-LD badge data)
+  badgeData     Json     // Complete ThreadRing badge JSON-LD
+  issuedAt      DateTime @default(now())
   
-  // Cryptographic proof
-  signature   String   // Signature of badge content
-  publicKey   String   // Public key used for signature
+  // Revocation
+  revokedAt     DateTime?
+  revocationReason String?
   
-  // Visual representation
-  imageUrl    String?  // Optional 88x31 badge image
-  metadata    Json?    // Additional badge metadata
-  
-  @@index([ringId])
-  @@index([issuedTo])
+  @@index([membershipId])
+  @@index([issuedAt])
 }
 
 // Reference to external content
@@ -228,6 +227,39 @@ enum BlockType {
   USER      // Individual user
   INSTANCE  // Entire instance/domain
   ACTOR     // Any actor type
+}
+
+// Invitations to join rings
+model Invitation {
+  id          String   @id @default(uuid())
+  ringId      String
+  ring        Ring     @relation(fields: [ringId], references: [id], onDelete: Cascade)
+  
+  inviteeDid  String   // DID of person being invited
+  inviterDid  String   // DID of person sending invitation
+  
+  status      InvitationStatus @default(PENDING)
+  message     String?  // Optional invitation message
+  
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime // Invitation expiry
+  respondedAt DateTime?
+  
+  metadata    Json?    // Additional invitation data
+  
+  @@unique([ringId, inviteeDid])
+  @@index([ringId])
+  @@index([inviteeDid])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+enum InvitationStatus {
+  PENDING   // Invitation sent, awaiting response
+  ACCEPTED  // Invitation accepted
+  DECLINED  // Invitation declined
+  EXPIRED   // Invitation expired
+  REVOKED   // Invitation revoked by inviter
 }
 
 // Audit log for all ring actions

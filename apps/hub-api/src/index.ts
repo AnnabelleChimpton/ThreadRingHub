@@ -10,6 +10,8 @@ import { logger } from './utils/logger';
 import { connectDatabase, disconnectDatabase, checkDatabaseHealth } from './database/prisma';
 import { connectRedis, disconnectRedis, checkRedisHealth } from './database/redis';
 import { ringsRoutes } from './routes/rings';
+import { membershipRoutes } from './routes/membership';
+import { contentRoutes } from './routes/content';
 
 async function buildApp() {
   const fastify = Fastify({
@@ -53,6 +55,7 @@ async function buildApp() {
         { name: 'health', description: 'Health check endpoints' },
         { name: 'rings', description: 'Ring management operations' },
         { name: 'membership', description: 'Membership operations' },
+        { name: 'badges', description: 'Badge issuance and verification' },
         { name: 'content', description: 'Content submission and curation' },
         { name: 'federation', description: 'Federation and ActivityPub' },
       ],
@@ -103,6 +106,8 @@ async function buildApp() {
 
   // Register API routes
   await fastify.register(ringsRoutes, { prefix: '/trp' });
+  await fastify.register(membershipRoutes, { prefix: '/trp' });
+  await fastify.register(contentRoutes, { prefix: '/trp' });
 
   // Graceful shutdown
   const closeGracefully = async (signal: string) => {

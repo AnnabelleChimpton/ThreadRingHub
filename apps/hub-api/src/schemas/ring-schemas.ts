@@ -72,6 +72,122 @@ export const ForkRingSchema = z.object({
   metadata: z.record(z.any()).optional(),
 });
 
+// Join ring schema
+export const JoinRingSchema = z.object({
+  ringSlug: z.string(),
+  message: z.string().max(500).optional(), // Application message for APPLICATION policy
+  metadata: z.record(z.any()).optional(),
+});
+
+// Update member role schema
+export const UpdateMemberRoleSchema = z.object({
+  role: z.string(),
+  metadata: z.record(z.any()).optional(),
+});
+
+// Badge schema
+export const BadgeSchema = z.object({
+  id: z.string(),
+  ringSlug: z.string(),
+  actorDid: z.string(),
+  issueDate: z.string(),
+  expiryDate: z.string().nullable(),
+  signature: z.string(), // Cryptographic signature
+  metadata: z.record(z.any()).optional(),
+});
+
+// Badge response
+export const BadgeResponseSchema = z.object({
+  badge: BadgeSchema,
+  verification: z.object({
+    isValid: z.boolean(),
+    verifiedAt: z.string(),
+    issuer: z.string(),
+  }),
+});
+
+// Submit post schema
+export const SubmitPostSchema = z.object({
+  ringSlug: z.string(),
+  uri: z.string().url(),
+  digest: z.string(), // Content hash/digest
+  actorDid: z.string().optional(), // If submitting on behalf of someone else
+  metadata: z.record(z.any()).optional(),
+});
+
+// Curate post schema
+export const CuratePostSchema = z.object({
+  action: z.enum(['accept', 'reject', 'pin', 'unpin', 'remove']),
+  reason: z.string().max(500).optional(),
+  metadata: z.record(z.any()).optional(),
+});
+
+// Post query schema
+export const PostQuerySchema = z.object({
+  limit: z.coerce.number().min(1).max(100).default(20),
+  offset: z.coerce.number().min(0).default(0),
+  status: z.enum(['PENDING', 'ACCEPTED', 'REJECTED', 'REMOVED']).optional(),
+  actorDid: z.string().optional(),
+  since: z.string().optional(), // ISO date string
+  until: z.string().optional(), // ISO date string
+  pinned: z.coerce.boolean().optional(),
+});
+
+// Audit query schema
+export const AuditQuerySchema = z.object({
+  limit: z.coerce.number().min(1).max(100).default(20),
+  offset: z.coerce.number().min(0).default(0),
+  action: z.string().optional(),
+  actorDid: z.string().optional(),
+  since: z.string().optional(), // ISO date string
+  until: z.string().optional(), // ISO date string
+});
+
+// Post response schema
+export const PostResponseSchema = z.object({
+  id: z.string(),
+  ringSlug: z.string(),
+  uri: z.string(),
+  digest: z.string(),
+  actorDid: z.string(),
+  submittedAt: z.string(),
+  submittedBy: z.string(),
+  status: z.enum(['PENDING', 'ACCEPTED', 'REJECTED', 'REMOVED']),
+  moderatedAt: z.string().nullable(),
+  moderatedBy: z.string().nullable(),
+  moderationNote: z.string().nullable(),
+  pinned: z.boolean(),
+  metadata: z.record(z.any()).nullable(),
+});
+
+// Posts list response
+export const PostsListResponseSchema = z.object({
+  posts: z.array(PostResponseSchema),
+  total: z.number(),
+  limit: z.number(),
+  offset: z.number(),
+  hasMore: z.boolean(),
+});
+
+// Audit entry response
+export const AuditEntryResponseSchema = z.object({
+  id: z.string(),
+  action: z.string(),
+  actorDid: z.string(),
+  targetDid: z.string().nullable(),
+  timestamp: z.string(),
+  metadata: z.record(z.any()).nullable(),
+});
+
+// Audit list response
+export const AuditListResponseSchema = z.object({
+  entries: z.array(AuditEntryResponseSchema),
+  total: z.number(),
+  limit: z.number(),
+  offset: z.number(),
+  hasMore: z.boolean(),
+});
+
 // Ring response schema
 export const RingResponseSchema = z.object({
   id: z.string(),
@@ -139,6 +255,18 @@ export type RingQueryInput = z.infer<typeof RingQuerySchema>;
 export type MemberQueryInput = z.infer<typeof MemberQuerySchema>;
 export type TrendingQueryInput = z.infer<typeof TrendingQuerySchema>;
 export type ForkRingInput = z.infer<typeof ForkRingSchema>;
+export type JoinRingInput = z.infer<typeof JoinRingSchema>;
+export type UpdateMemberRoleInput = z.infer<typeof UpdateMemberRoleSchema>;
+export type BadgeInput = z.infer<typeof BadgeSchema>;
+export type BadgeResponse = z.infer<typeof BadgeResponseSchema>;
+export type SubmitPostInput = z.infer<typeof SubmitPostSchema>;
+export type CuratePostInput = z.infer<typeof CuratePostSchema>;
+export type PostQueryInput = z.infer<typeof PostQuerySchema>;
+export type AuditQueryInput = z.infer<typeof AuditQuerySchema>;
+export type PostResponse = z.infer<typeof PostResponseSchema>;
+export type PostsListResponse = z.infer<typeof PostsListResponseSchema>;
+export type AuditEntryResponse = z.infer<typeof AuditEntryResponseSchema>;
+export type AuditListResponse = z.infer<typeof AuditListResponseSchema>;
 export type RingResponse = z.infer<typeof RingResponseSchema>;
 export type RingListResponse = z.infer<typeof RingListResponseSchema>;
 export type MemberResponse = z.infer<typeof MemberResponseSchema>;
