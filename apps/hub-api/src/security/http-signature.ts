@@ -322,6 +322,12 @@ export async function verifyHttpSignature(
       };
     }
     
+    logger.info({ 
+      keyId: components.keyId,
+      publicKey: publicKey,
+      publicKeyLength: publicKey.length 
+    }, 'Resolved public key for signature verification');
+    
     // Build signing string
     const signingString = buildSigningString(request, components.headers);
     logger.info({ 
