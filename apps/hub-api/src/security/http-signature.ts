@@ -88,44 +88,69 @@ function buildSigningString(
 ): string {
   const lines: string[] = [];
   
+  logger.info({ 
+    method: request.method, 
+    url: request.url, 
+    headers: Object.keys(request.headers),
+    requestHeaders: headers 
+  }, 'Building signing string from request');
+  
   for (const header of headers) {
     if (header === '(request-target)') {
       // Special case: request target
       const method = request.method.toLowerCase();
       const path = request.url;
-      lines.push(`(request-target): ${method} ${path}`);
+      const line = `(request-target): ${method} ${path}`;
+      lines.push(line);
+      logger.info({ line }, 'Added request-target to signing string');
     } else if (header === '(created)') {
       // Special case: created timestamp
       const created = Math.floor(Date.now() / 1000);
-      lines.push(`(created): ${created}`);
+      const line = `(created): ${created}`;
+      lines.push(line);
+      logger.info({ line }, 'Added created to signing string');
     } else if (header === '(expires)') {
       // Special case: expires timestamp
       const expires = Math.floor(Date.now() / 1000) + 300; // 5 minutes
-      lines.push(`(expires): ${expires}`);
+      const line = `(expires): ${expires}`;
+      lines.push(line);
+      logger.info({ line }, 'Added expires to signing string');
     } else if (header === 'digest') {
       // Use the digest header from the request (already calculated by client)
       const value = request.headers['digest'];
       if (value) {
-        lines.push(`digest: ${value}`);
-        logger.info({ digestFromHeader: value }, 'Using digest from request header');
+        const line = `digest: ${value}`;
+        lines.push(line);
+        logger.info({ line, digestFromHeader: value }, 'Added digest from request header to signing string');
       } else {
         // Fallback: calculate digest
         const body = JSON.stringify(request.body || '');
         const digest = Buffer.from(sha256(body)).toString('base64');
         const digestHeader = `sha-256=${digest}`;
-        lines.push(`digest: ${digestHeader}`);
-        logger.info({ body, digest, digestHeader }, 'Calculated digest fallback');
+        const line = `digest: ${digestHeader}`;
+        lines.push(line);
+        logger.warn({ line, body, digest, digestHeader }, 'Added calculated digest fallback to signing string');
       }
     } else {
       // Regular header
       const value = request.headers[header.toLowerCase()];
       if (value) {
-        lines.push(`${header.toLowerCase()}: ${value}`);
+        const line = `${header.toLowerCase()}: ${value}`;
+        lines.push(line);
+        logger.info({ header, value, line }, 'Added regular header to signing string');
+      } else {
+        logger.warn({ header, availableHeaders: Object.keys(request.headers) }, 'Missing header for signing string');
       }
     }
   }
   
-  return lines.join('\n');
+  const signingString = lines.join('\n');
+  logger.info({ 
+    signingString: signingString.replace(/\n/g, '\\n'),
+    lineCount: lines.length 
+  }, 'Built complete signing string');
+  
+  return signingString;
 }
 
 /**
@@ -142,10 +167,25 @@ async function verifyEd25519Signature(
     const signatureBytes = Buffer.from(signature, 'base64');
     const messageBytes = new TextEncoder().encode(message);
     
+    logger.info({
+      publicKeyLength: pubKeyBytes.length,
+      signatureLength: signatureBytes.length,
+      messageLength: messageBytes.length,
+      publicKeyHex: pubKeyBytes.toString('hex').substring(0, 16) + '...',
+      signatureHex: signatureBytes.toString('hex').substring(0, 16) + '...',
+      messagePreview: message.substring(0, 100) + (message.length > 100 ? '...' : ''),
+    }, 'Ed25519 signature verification details');
+    
     // Verify signature
     return await ed.verify(signatureBytes, messageBytes, pubKeyBytes);
   } catch (error) {
-    logger.error({ error }, 'Failed to verify Ed25519 signature');
+    logger.error({ 
+      error: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : undefined,
+      publicKeyLength: publicKey.length,
+      signatureLength: signature.length,
+      messageLength: message.length,
+    }, 'Failed to verify Ed25519 signature');
     return false;
   }
 }
