@@ -985,7 +985,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         actorName: actorNameMap.get(m.actorDid) || null,
         status: m.status,
         role: m.role?.name || null,
-        joinedAt: m.joinedAt.toISOString(),
+        joinedAt: m.joinedAt?.toISOString() || null,
         badgeId: m.badgeId,
       }));
 
@@ -999,7 +999,11 @@ export async function ringsRoutes(fastify: FastifyInstance) {
 
       reply.send(response);
     } catch (error) {
-      logger.error({ error }, 'Failed to get ring members');
+      logger.error({ 
+        error: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        ringSlug: request.params.slug 
+      }, 'Failed to get ring members');
       reply.code(500).send({
         error: 'Internal error',
         message: 'Failed to retrieve ring members',
