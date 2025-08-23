@@ -165,12 +165,29 @@ async function resolveWebDID(did: string): Promise<DIDDocument | null> {
     }
 
     // Remove 'did:web:' prefix
-    const domain = parts.slice(2).join(':');
+    const domainParts = parts.slice(2);
     
-    // Convert to URL
-    // Replace colons with slashes for path components
-    const urlPath = domain.replace(/:/g, '/');
-    const url = `https://${urlPath}/.well-known/did.json`;
+    // Convert to URL based on DID structure
+    let url: string;
+    
+    if (domainParts.length === 1) {
+      // Root domain DID: did:web:example.com -> https://example.com/.well-known/did.json
+      url = `https://${domainParts[0]}/.well-known/did.json`;
+    } else if (domainParts.length === 3 && (domainParts[1] === 'users' || domainParts[1] === 'actors')) {
+      // User/Actor DID: 
+      // did:web:example.com:users:hash -> https://example.com/users/hash/did.json
+      // did:web:example.com:actors:alice -> https://example.com/actors/alice/did.json
+      const domain = domainParts[0];
+      const type = domainParts[1]; // 'users' or 'actors'
+      const identifier = domainParts[2];
+      url = `https://${domain}/${type}/${identifier}/did.json`;
+    } else {
+      // Generic path-based DID: did:web:example.com:path:to:resource
+      // -> https://example.com/path/to/resource/did.json
+      const domain = domainParts[0];
+      const path = domainParts.slice(1).join('/');
+      url = `https://${domain}/${path}/did.json`;
+    }
 
     // In production, this would make an HTTP request
     // For now, we'll create a mock response for local development
@@ -179,7 +196,7 @@ async function resolveWebDID(did: string): Promise<DIDDocument | null> {
     }
 
     // Fetch DID document from URL
-    logger.info({ url }, 'Fetching DID document from URL');
+    logger.info({ did, url }, 'Fetching DID document from URL');
     
     try {
       const response = await fetch(url, {
