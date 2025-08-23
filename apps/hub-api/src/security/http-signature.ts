@@ -125,7 +125,19 @@ function buildSigningString(
       if (value) {
         const line = `digest: ${value}`;
         lines.push(line);
-        logger.info({ line, digestFromHeader: value }, 'Added digest from request header to signing string');
+        
+        // Also calculate what the server would compute to compare
+        const body = JSON.stringify(request.body || '');
+        const serverCalculatedDigest = Buffer.from(sha256(body)).toString('base64');
+        const serverDigestHeader = `sha-256=${serverCalculatedDigest}`;
+        
+        logger.info({ 
+          line, 
+          clientDigest: value,
+          serverCalculated: serverDigestHeader,
+          requestBody: body,
+          digestsMatch: value === serverDigestHeader
+        }, 'Added digest from request header to signing string with comparison');
       } else {
         // Fallback: calculate digest
         const body = JSON.stringify(request.body || '');
