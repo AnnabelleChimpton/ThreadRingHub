@@ -24,6 +24,9 @@ const configSchema = z.object({
     jwtSecret: z.string().min(32),
     bcryptRounds: z.number().int().min(10).max(15).default(12),
   }),
+  rings: z.object({
+    rootSlug: z.string().default('spool'),
+  }),
 });
 
 function loadConfig() {
@@ -46,6 +49,9 @@ function loadConfig() {
     security: {
       jwtSecret: process.env.JWT_SECRET || 'change-me-in-production-please-use-a-real-secret',
       bcryptRounds: parseInt(process.env.BCRYPT_ROUNDS || '12', 10),
+    },
+    rings: {
+      rootSlug: process.env.ROOT_RING_SLUG || 'spool',
     },
   };
 

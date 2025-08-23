@@ -27,6 +27,7 @@ import {
   type RingListResponse,
   type MembersListResponse,
 } from '../schemas/ring-schemas';
+import { config } from '../config';
 
 /**
  * Generate a unique slug from ring name
@@ -155,6 +156,42 @@ async function buildRingResponse(
 export async function ringsRoutes(fastify: FastifyInstance) {
   // Add security middleware to all protected routes
   fastify.addHook('preHandler', auditLogger);
+
+  /**
+   * GET /trp/root - Get the root ThreadRing (efficient redirect to spool)
+   */
+  fastify.get('/root', {
+    schema: {
+      tags: ['rings'],
+      summary: 'Get root ThreadRing',
+    },
+  }, async (request, reply) => {
+    try {
+      // Efficient: Just redirect to the known root slug instead of querying database
+      const rootSlug = config.rings.rootSlug;
+      
+      const ring = await prisma.ring.findUnique({
+        where: { slug: rootSlug },
+      });
+
+      if (!ring) {
+        reply.code(404).send({
+          error: 'Not found',
+          message: 'Root ring not found',
+        });
+        return;
+      }
+
+      const response = await buildRingResponse(ring, true, true);
+      reply.send(response);
+    } catch (error) {
+      logger.error({ error }, 'Failed to get root ring');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to retrieve root ring',
+      });
+    }
+  });
 
   /**
    * GET /trp/rings - List and search rings

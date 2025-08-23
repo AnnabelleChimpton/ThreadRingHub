@@ -62,7 +62,7 @@ async function main() {
   // Create The Spool (root ring)
   const spool = await prisma.ring.create({
     data: {
-      slug: 'the-spool',
+      slug: 'spool',
       name: 'The Spool',
       description: 'The universal root of all ThreadRings - where all communities connect',
       visibility: 'PUBLIC',
@@ -316,7 +316,7 @@ async function main() {
   console.log('  - Charlie (did:web:localhost:3100:actors:charlie) - Pending member');
   console.log('');
   console.log('Sample rings:');
-  console.log('  - /the-spool (root)');
+  console.log('  - /spool (root)');
   console.log('  - /sustainable-tech');
   console.log('  - /solar-innovation');
   console.log('  - /urban-mobility');
