@@ -181,7 +181,9 @@ async function verifyEd25519Signature(
     }, 'Ed25519 signature verification details');
     
     // Verify signature
-    return await ed.verify(signatureBytes, messageBytes, pubKeyBytes);
+    const isValid = await ed.verify(signatureBytes, messageBytes, pubKeyBytes);
+    logger.info({ isValid }, 'Ed25519 signature verification result');
+    return isValid;
   } catch (error) {
     logger.error({ 
       error: error instanceof Error ? error.message : String(error),
@@ -324,7 +326,10 @@ export async function verifyHttpSignature(
       components.signature
     );
     
+    logger.info({ valid, keyId: components.keyId }, 'HTTP signature verification completed');
+    
     if (!valid) {
+      logger.warn({ keyId: components.keyId }, 'HTTP signature verification failed - invalid signature');
       return { valid: false, error: 'Invalid signature' };
     }
     
@@ -334,9 +339,16 @@ export async function verifyHttpSignature(
       select: { actorDid: true },
     });
     
+    const actorDid = key?.actorDid || components.keyId.split('#')[0];
+    logger.info({ 
+      keyId: components.keyId, 
+      actorDid,
+      fromCache: !!key?.actorDid 
+    }, 'HTTP signature verification successful');
+    
     return {
       valid: true,
-      actorDid: key?.actorDid || components.keyId.split('#')[0], // Extract DID from keyId if not in cache
+      actorDid,
       keyId: components.keyId,
       publicKey: publicKey,
     };

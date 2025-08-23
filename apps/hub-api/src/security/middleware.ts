@@ -36,7 +36,18 @@ export async function authenticateActor(
     // Verify HTTP signature
     const result = await verifyHttpSignature(request);
     
+    logger.info({ 
+      valid: result.valid, 
+      actorDid: result.actorDid, 
+      error: result.error 
+    }, 'HTTP signature verification result in middleware');
+    
     if (!result.valid) {
+      logger.warn({ 
+        error: result.error, 
+        method: request.method, 
+        url: request.url 
+      }, 'Authentication failed in middleware');
       reply.code(401).send({
         error: 'Authentication required',
         message: result.error || 'Invalid or missing signature',
@@ -46,7 +57,15 @@ export async function authenticateActor(
 
     // Get or register actor information
     if (result.actorDid) {
+      logger.info({ actorDid: result.actorDid }, 'Looking up actor information');
       let actor = await getActor(result.actorDid);
+      
+      logger.info({ 
+        actorDid: result.actorDid, 
+        existingActor: !!actor,
+        verified: actor?.verified,
+        trusted: actor?.trusted 
+      }, 'Actor lookup result');
       
       // If actor doesn't exist, register them
       if (!actor) {
@@ -57,6 +76,12 @@ export async function authenticateActor(
           type: 'USER', // Default to USER type, can be updated later if needed
           publicKey: result.publicKey, // From HTTP signature verification
         });
+        
+        logger.info({ 
+          did: result.actorDid, 
+          registered: !!actor,
+          verified: actor?.verified 
+        }, 'Actor registration result');
       }
       
       if (actor) {
@@ -67,7 +92,17 @@ export async function authenticateActor(
           trusted: actor.trusted,
         };
         request.keyId = result.keyId;
+        
+        logger.info({ 
+          actorDid: actor.did, 
+          verified: actor.verified, 
+          trusted: actor.trusted 
+        }, 'Actor attached to request');
+      } else {
+        logger.error({ actorDid: result.actorDid }, 'Failed to get or register actor');
       }
+    } else {
+      logger.warn('No actor DID found in signature verification result');
     }
   } catch (error) {
     logger.error({ error }, 'Authentication middleware error');
@@ -85,13 +120,28 @@ export async function requireVerifiedActor(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
+  logger.info({ 
+    hasActor: !!request.actor,
+    actorDid: request.actor?.did,
+    verified: request.actor?.verified,
+    trusted: request.actor?.trusted 
+  }, 'Checking actor verification requirement');
+  
   if (!request.actor?.verified) {
+    logger.warn({ 
+      actorDid: request.actor?.did,
+      verified: request.actor?.verified,
+      hasActor: !!request.actor 
+    }, 'Actor verification requirement failed');
+    
     reply.code(403).send({
       error: 'Verification required',
       message: 'This action requires a verified actor',
     });
     return;
   }
+  
+  logger.info({ actorDid: request.actor.did }, 'Actor verification requirement passed');
 }
 
 /**
