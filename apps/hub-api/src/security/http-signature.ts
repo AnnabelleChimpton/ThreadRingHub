@@ -1,9 +1,13 @@
 import * as ed from '@noble/ed25519';
 import { sha256 } from '@noble/hashes/sha256';
+import { sha512 } from '@noble/hashes/sha512';
 import { FastifyRequest } from 'fastify';
 import { prisma } from '../database/prisma';
 import { logger } from '../utils/logger';
 import { resolveDID, extractPublicKey } from './did-resolver';
+
+// Configure SHA-512 for @noble/ed25519
+ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
 
 interface SignatureComponents {
   keyId: string;
