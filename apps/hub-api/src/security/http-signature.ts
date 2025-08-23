@@ -228,15 +228,16 @@ async function fetchPublicKey(keyId: string): Promise<string | null> {
       return cached.publicKey;
     }
     
-    // Extract DID from keyId (format: "did:web:domain.com#key-1")
+    // Extract DID from keyId (format: "did:web:domain.com#key-1" or "did:key:z6Mk...#key-1")
     const did = keyId.split('#')[0];
+    
     if (did.startsWith('did:web:')) {
-      logger.info({ keyId, did }, 'Resolving DID for unknown key');
+      logger.info({ keyId, did }, 'Resolving did:web DID for unknown key');
       
       // Resolve DID document to get public key
       const didDocument = await resolveDID(did);
       if (didDocument) {
-        const publicKey = extractPublicKey(didDocument);
+        const publicKey = extractPublicKey(didDocument, keyId);
         if (publicKey) {
           // Cache the key for future use
           await prisma.httpSignature.create({
@@ -248,7 +249,20 @@ async function fetchPublicKey(keyId: string): Promise<string | null> {
             },
           });
           
-          logger.info({ keyId, did }, 'Cached public key from DID resolution');
+          logger.info({ keyId, did }, 'Cached public key from did:web DID resolution');
+          return publicKey;
+        }
+      }
+    } else if (did.startsWith('did:key:')) {
+      logger.info({ keyId, did }, 'Resolving did:key DID for unknown key');
+      
+      // For did:key, resolve the DID document (self-contained)
+      const didDocument = await resolveDID(did);
+      if (didDocument) {
+        const publicKey = extractPublicKey(didDocument, keyId);
+        if (publicKey) {
+          // Don't cache did:key keys in database as they're self-contained
+          logger.info({ keyId, did }, 'Resolved public key from did:key DID');
           return publicKey;
         }
       }
