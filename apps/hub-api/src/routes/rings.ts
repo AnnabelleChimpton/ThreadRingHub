@@ -268,6 +268,116 @@ export async function ringsRoutes(fastify: FastifyInstance) {
   });
 
   /**
+   * GET /trp/my/memberships - Get current user's ring memberships
+   */
+  fastify.get<{ Querystring: { status?: string; limit?: number; offset?: number } }>('/my/memberships', {
+    preHandler: [authenticateActor],
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['PENDING', 'ACTIVE', 'SUSPENDED', 'REVOKED'] },
+          limit: { type: 'number', minimum: 1, maximum: 100, default: 20 },
+          offset: { type: 'number', minimum: 0, default: 0 },
+        },
+      },
+      tags: ['memberships'],
+      summary: 'Get current user\'s ring memberships',
+      security: [{ httpSignature: [] }],
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            memberships: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  ringSlug: { type: 'string' },
+                  ringName: { type: 'string' },
+                  ringDescription: { type: 'string' },
+                  ringVisibility: { type: 'string' },
+                  status: { type: 'string' },
+                  role: { type: 'string' },
+                  joinedAt: { type: 'string' },
+                  badgeId: { type: 'string' },
+                },
+              },
+            },
+            total: { type: 'number' },
+            limit: { type: 'number' },
+            offset: { type: 'number' },
+            hasMore: { type: 'boolean' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      if (!request.actor) {
+        reply.code(401).send({
+          error: 'Authentication required',
+          message: 'Must be authenticated to view memberships',
+        });
+        return;
+      }
+
+      const { status, limit = 20, offset = 0 } = request.query;
+      const actorDid = request.actor.did;
+
+      const where: any = { actorDid };
+      // Default to ACTIVE memberships unless specified
+      where.status = status || 'ACTIVE';
+
+      const [memberships, total] = await Promise.all([
+        prisma.membership.findMany({
+          where,
+          include: {
+            ring: {
+              select: {
+                slug: true,
+                name: true,
+                description: true,
+                visibility: true,
+              },
+            },
+            role: { select: { name: true } },
+          },
+          take: limit,
+          skip: offset,
+          orderBy: { joinedAt: 'desc' },
+        }),
+        prisma.membership.count({ where }),
+      ]);
+
+      const userMemberships = memberships.map(m => ({
+        ringSlug: m.ring.slug,
+        ringName: m.ring.name,
+        ringDescription: m.ring.description,
+        ringVisibility: m.ring.visibility,
+        status: m.status,
+        role: m.role?.name || null,
+        joinedAt: m.joinedAt?.toISOString() || null,
+        badgeId: m.badgeId,
+      }));
+
+      reply.send({
+        memberships: userMemberships,
+        total,
+        limit,
+        offset,
+        hasMore: offset + limit < total,
+      });
+    } catch (error) {
+      logger.error({ error }, 'Failed to get user memberships');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to retrieve memberships',
+      });
+    }
+  });
+
+  /**
    * GET /trp/rings - List and search rings
    */
   fastify.get<{ Querystring: RingQueryInput }>('/rings', {
