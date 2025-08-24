@@ -58,11 +58,6 @@ export async function membershipRoutes(fastify: FastifyInstance) {
       // Find the ring
       const ring = await prisma.ring.findUnique({
         where: { slug: ringSlug },
-        include: {
-          roles: {
-            orderBy: { name: 'asc' },
-          },
-        },
         select: {
           id: true,
           slug: true,

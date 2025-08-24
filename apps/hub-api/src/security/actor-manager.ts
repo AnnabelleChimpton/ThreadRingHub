@@ -284,12 +284,10 @@ export async function isActorBlocked(
   ringId: string
 ): Promise<boolean> {
   try {
-    const block = await prisma.block.findUnique({
+    const block = await prisma.block.findFirst({
       where: {
-        ringId_targetDid: {
-          ringId,
-          targetDid: actorDid,
-        },
+        ringId,
+        targetDid: actorDid,
       },
     });
 
