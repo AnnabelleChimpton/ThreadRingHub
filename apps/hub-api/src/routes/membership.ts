@@ -63,6 +63,8 @@ export async function membershipRoutes(fastify: FastifyInstance) {
           slug: true,
           name: true,
           joinPolicy: true,
+          badgeImageUrl: true,
+          badgeImageHighResUrl: true,
           roles: {
             orderBy: { name: 'asc' },
           },
@@ -203,7 +205,9 @@ export async function membershipRoutes(fastify: FastifyInstance) {
             actor?.name || 'Unknown',
             memberRole.name,
             RING_HUB_PRIVATE_KEY,
-            RING_HUB_URL
+            RING_HUB_URL,
+            ring.badgeImageUrl || undefined,
+            ring.badgeImageHighResUrl || undefined
           );
 
           // Store badge reference
