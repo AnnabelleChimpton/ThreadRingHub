@@ -1291,4 +1291,174 @@ export async function ringsRoutes(fastify: FastifyInstance) {
       });
     }
   });
+
+  /**
+   * GET /trp/rings/:slug/membership-info - Get public membership information
+   * Returns total member count and info about curators/moderators
+   * This is a public endpoint - no authentication required
+   */
+  fastify.get<{ 
+    Params: { slug: string }
+  }>('/rings/:slug/membership-info', {
+    schema: {
+      params: {
+        type: 'object',
+        properties: {
+          slug: { type: 'string' },
+        },
+        required: ['slug'],
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            memberCount: { type: 'number' },
+            owner: {
+              type: 'object',
+              nullable: true,
+              properties: {
+                actorDid: { type: 'string' },
+                actorName: { type: 'string', nullable: true },
+                joinedAt: { type: 'string', nullable: true },
+              },
+            },
+            moderators: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  actorDid: { type: 'string' },
+                  actorName: { type: 'string', nullable: true },
+                  role: { type: 'string' },
+                  joinedAt: { type: 'string', nullable: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { slug } = request.params;
+    const logger = request.log;
+
+    try {
+      // Find the ring
+      const ring = await prisma.ring.findUnique({
+        where: { slug },
+        select: {
+          id: true,
+          ownerDid: true,
+          visibility: true,
+        },
+      });
+
+      if (!ring) {
+        return reply.code(404).send({
+          error: 'Not found',
+          message: 'Ring not found',
+        });
+      }
+
+      // Check if ring is private - if so, return limited info
+      if (ring.visibility === 'PRIVATE') {
+        return reply.code(403).send({
+          error: 'Forbidden',
+          message: 'Ring membership information is private',
+        });
+      }
+
+      // Get total member count
+      const memberCount = await prisma.membership.count({
+        where: {
+          ringId: ring.id,
+          status: 'ACTIVE',
+        },
+      });
+
+      // Get roles with moderation/management permissions
+      const moderatorRoles = await prisma.ringRole.findMany({
+        where: {
+          ringId: ring.id,
+          OR: [
+            { name: 'owner' },
+            { name: 'moderator' },
+            { name: 'admin' },
+            {
+              permissions: {
+                array_contains: 'moderate_posts',
+              },
+            },
+            {
+              permissions: {
+                array_contains: 'manage_ring',
+              },
+            },
+          ],
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      // Get members with moderator roles
+      const moderatorMembers = await prisma.membership.findMany({
+        where: {
+          ringId: ring.id,
+          status: 'ACTIVE',
+          roleId: {
+            in: moderatorRoles.map(r => r.id),
+          },
+        },
+        include: {
+          role: {
+            select: { name: true },
+          },
+        },
+      });
+
+      // Get actor names for moderators
+      const actorDids = moderatorMembers.map(m => m.actorDid);
+      const actors = await prisma.actor.findMany({
+        where: { did: { in: actorDids } },
+        select: { did: true, name: true },
+      });
+
+      const actorNameMap = new Map(actors.map(a => [a.did, a.name]));
+
+      // Find owner info
+      const ownerMember = moderatorMembers.find(m => m.actorDid === ring.ownerDid);
+      const owner = ownerMember ? {
+        actorDid: ownerMember.actorDid,
+        actorName: actorNameMap.get(ownerMember.actorDid) || null,
+        joinedAt: ownerMember.joinedAt?.toISOString() || null,
+      } : null;
+
+      // Format moderators (excluding owner to avoid duplication)
+      const moderators = moderatorMembers
+        .filter(m => m.actorDid !== ring.ownerDid)
+        .map(m => ({
+          actorDid: m.actorDid,
+          actorName: actorNameMap.get(m.actorDid) || null,
+          role: m.role?.name || 'moderator',
+          joinedAt: m.joinedAt?.toISOString() || null,
+        }));
+
+      reply.send({
+        memberCount,
+        owner,
+        moderators,
+      });
+    } catch (error) {
+      logger.error({ 
+        error: error instanceof Error ? error.message : String(error),
+        ringSlug: slug 
+      }, 'Failed to get ring membership info');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to retrieve membership information',
+      });
+    }
+  });
 }
