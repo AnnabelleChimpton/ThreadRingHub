@@ -158,6 +158,80 @@ export async function ringsRoutes(fastify: FastifyInstance) {
   fastify.addHook('preHandler', auditLogger);
 
   /**
+   * GET /trp/stats - Get network statistics
+   */
+  fastify.get('/stats', {
+    schema: {
+      tags: ['rings'],
+      summary: 'Get network statistics',
+      description: 'Returns total counts of rings, actors, and other network metrics',
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            totalRings: { type: 'number' },
+            publicRings: { type: 'number' },
+            privateRings: { type: 'number' },
+            unlistedRings: { type: 'number' },
+            totalActors: { type: 'number' },
+            verifiedActors: { type: 'number' },
+            totalMemberships: { type: 'number' },
+            activeMemberships: { type: 'number' },
+            totalPosts: { type: 'number' },
+            acceptedPosts: { type: 'number' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      // Run all counts in parallel for efficiency
+      const [
+        totalRings,
+        publicRings,
+        privateRings,
+        unlistedRings,
+        totalActors,
+        verifiedActors,
+        totalMemberships,
+        activeMemberships,
+        totalPosts,
+        acceptedPosts,
+      ] = await Promise.all([
+        prisma.ring.count(),
+        prisma.ring.count({ where: { visibility: 'PUBLIC' } }),
+        prisma.ring.count({ where: { visibility: 'PRIVATE' } }),
+        prisma.ring.count({ where: { visibility: 'UNLISTED' } }),
+        prisma.actor.count(),
+        prisma.actor.count({ where: { verified: true } }),
+        prisma.membership.count(),
+        prisma.membership.count({ where: { status: 'ACTIVE' } }),
+        prisma.postRef.count(),
+        prisma.postRef.count({ where: { status: 'ACCEPTED' } }),
+      ]);
+
+      reply.send({
+        totalRings,
+        publicRings,
+        privateRings,
+        unlistedRings,
+        totalActors,
+        verifiedActors,
+        totalMemberships,
+        activeMemberships,
+        totalPosts,
+        acceptedPosts,
+      });
+    } catch (error) {
+      logger.error({ error }, 'Failed to get network statistics');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to retrieve network statistics',
+      });
+    }
+  });
+
+  /**
    * GET /trp/root - Get the root ThreadRing (efficient redirect to spool)
    */
   fastify.get('/root', {
@@ -885,6 +959,52 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         return;
       }
 
+      // Check if user can access private ring lineage
+      if (ring.visibility === 'PRIVATE' && request.actor) {
+        const membership = await prisma.membership.findFirst({
+          where: {
+            ringId: ring.id,
+            actorDid: request.actor.did,
+            status: 'ACTIVE',
+          },
+        });
+
+        if (!membership) {
+          reply.code(404).send({
+            error: 'Not found',
+            message: 'Ring not found',
+          });
+          return;
+        }
+      } else if (ring.visibility === 'PRIVATE' && !request.actor) {
+        // Private ring, no authentication provided
+        reply.code(404).send({
+          error: 'Not found',
+          message: 'Ring not found',
+        });
+        return;
+      }
+
+      // Helper function to check if user can see a ring
+      async function canSeeRing(targetRing: any): Promise<boolean> {
+        if (targetRing.visibility === 'PUBLIC') return true;
+        if (targetRing.visibility === 'UNLISTED') return true; // Visible if you know the lineage
+        if (targetRing.visibility === 'PRIVATE' && !request.actor) return false;
+        
+        if (targetRing.visibility === 'PRIVATE' && request.actor) {
+          const membership = await prisma.membership.findFirst({
+            where: {
+              ringId: targetRing.id,
+              actorDid: request.actor.did,
+              status: 'ACTIVE',
+            },
+          });
+          return !!membership;
+        }
+        
+        return false;
+      }
+
       // Build complete genealogy
       const ancestors = [];
       let currentRing = ring;
@@ -896,27 +1016,31 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         
         if (!parent) break;
         
-        ancestors.unshift(await buildRingResponse(parent));
+        // Only include if user can see this ring
+        if (await canSeeRing(parent)) {
+          ancestors.unshift(await buildRingResponse(parent));
+        }
         currentRing = parent;
       }
 
-      // Get all descendants
+      // Get all descendants (filtered by visibility)
       async function getDescendants(ringId: string): Promise<any[]> {
         const children = await prisma.ring.findMany({
           where: { parentId: ringId },
         });
 
-        const descendants = await Promise.all(
-          children.map(async (child) => {
+        const visibleChildren = [];
+        for (const child of children) {
+          if (await canSeeRing(child)) {
             const childDescendants = await getDescendants(child.id);
-            return {
+            visibleChildren.push({
               ...await buildRingResponse(child),
               children: childDescendants,
-            };
-          })
-        );
+            });
+          }
+        }
 
-        return descendants;
+        return visibleChildren;
       }
 
       const descendants = await getDescendants(ring.id);

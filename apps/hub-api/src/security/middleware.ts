@@ -169,7 +169,13 @@ export function requireNotBlocked(ringParam: string = 'slug') {
       return; // Authentication middleware should handle this
     }
 
-    const ringSlug = (request.params as any)[ringParam];
+    // Try to get ring slug from params first, then body
+    let ringSlug = (request.params as any)[ringParam];
+    if (!ringSlug && request.body) {
+      // For endpoints like /join where ring slug is in body
+      ringSlug = (request.body as any).ringSlug || (request.body as any)[ringParam];
+    }
+    
     if (!ringSlug) {
       reply.code(400).send({
         error: 'Invalid request',
@@ -317,6 +323,7 @@ function isPublicEndpoint(url: string, method?: string): boolean {
     const getPublicPaths = [
       '/trp/rings',
       '/trp/rings/trending',
+      '/trp/stats',
     ];
     
     if (getPublicPaths.some(path => url === path || url.startsWith(path + '?'))) {
