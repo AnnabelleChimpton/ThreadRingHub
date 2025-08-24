@@ -279,11 +279,28 @@ export async function contentRoutes(fastify: FastifyInstance) {
       // Build query filters
       const where: any = { ringId: ring.id };
 
-      // Only show accepted posts to non-members
-      if (!request.actor || ring.visibility === 'PUBLIC') {
+      // Show posts based on authentication and membership
+      if (!request.actor) {
+        // Non-authenticated users only see accepted posts
         where.status = 'ACCEPTED';
-      } else if (status) {
-        where.status = status;
+      } else {
+        // Check if authenticated user is a member
+        const membership = await prisma.membership.findFirst({
+          where: {
+            ringId: ring.id,
+            actorDid: request.actor.did,
+            status: 'ACTIVE',
+          },
+        });
+        
+        if (membership) {
+          // Members can see all posts for moderation, unless status filter specified
+          if (status) where.status = status;
+          // Otherwise show all posts (PENDING, ACCEPTED, REJECTED)
+        } else {
+          // Non-members only see accepted posts
+          where.status = 'ACCEPTED';
+        }
       }
 
       if (actorDid) {
