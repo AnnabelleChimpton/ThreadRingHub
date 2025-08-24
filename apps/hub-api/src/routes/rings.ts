@@ -1123,7 +1123,8 @@ export async function ringsRoutes(fastify: FastifyInstance) {
       }
 
       const where: any = { ringId: ring.id };
-      if (status) where.status = status;
+      // Default to ACTIVE members only, unless specific status requested
+      where.status = status || 'ACTIVE';
       if (role) {
         where.role = { name: role };
       }
