@@ -38,10 +38,16 @@ function generateSlug(name: string, existingSlugs: string[] = []): string {
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
+    .substring(0, 25) // Limit to 25 characters
+    .replace(/-+$/, '') // Remove trailing hyphens after truncation
     .trim();
 
   if (baseSlug.length === 0) {
     baseSlug = 'ring';
+  } else if (baseSlug.length < 3) {
+    // Ensure minimum 3 characters
+    baseSlug = baseSlug.padEnd(3, '1');
   }
 
   // Ensure uniqueness
@@ -627,8 +633,8 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         properties: {
           slug: { 
             type: 'string',
-            minLength: 1,
-            maxLength: 63, // DNS subdomain limit
+            minLength: 3,
+            maxLength: 25, // Similar to Reddit (21) but slightly more generous
             pattern: '^[a-z0-9-]+$' // Only lowercase letters, numbers, and hyphens
           },
         },
