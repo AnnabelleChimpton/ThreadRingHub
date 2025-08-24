@@ -715,6 +715,12 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         type: 'object',
         properties: {
           name: { type: 'string', minLength: 1, maxLength: 100 },
+          slug: { 
+            type: 'string', 
+            minLength: 3, 
+            maxLength: 25, 
+            pattern: '^[a-z0-9-]+$' 
+          },
           description: { type: 'string', maxLength: 500 },
           shortCode: { type: 'string', minLength: 2, maxLength: 10, pattern: '^[a-zA-Z0-9-]+$' },
           visibility: { type: 'string', enum: ['PUBLIC', 'UNLISTED', 'PRIVATE'], default: 'PUBLIC' },
@@ -754,11 +760,48 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         }
       }
 
-      // Generate unique slug
-      const existingSlugs = await prisma.ring.findMany({
-        select: { slug: true },
-      });
-      const slug = generateSlug(data.name, existingSlugs.map(r => r.slug));
+      // Handle custom slug or generate from name
+      let slug: string;
+      
+      if (data.slug) {
+        // Validate custom slug
+        if (data.slug.startsWith('-') || data.slug.endsWith('-')) {
+          reply.code(400).send({
+            error: 'Invalid slug',
+            message: 'Slug cannot start or end with a hyphen',
+          });
+          return;
+        }
+
+        if (data.slug.includes('--')) {
+          reply.code(400).send({
+            error: 'Invalid slug',
+            message: 'Slug cannot contain consecutive hyphens',
+          });
+          return;
+        }
+
+        // Check if custom slug is already taken
+        const existingRing = await prisma.ring.findUnique({
+          where: { slug: data.slug },
+        });
+
+        if (existingRing) {
+          reply.code(400).send({
+            error: 'Slug unavailable',
+            message: `Ring slug '${data.slug}' is already taken`,
+          });
+          return;
+        }
+
+        slug = data.slug;
+      } else {
+        // Generate unique slug from name
+        const existingSlugs = await prisma.ring.findMany({
+          select: { slug: true },
+        });
+        slug = generateSlug(data.name, existingSlugs.map(r => r.slug));
+      }
 
       // Create the ring
       const ring = await prisma.ring.create({
@@ -1021,6 +1064,12 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         properties: {
           parentSlug: { type: 'string' },
           name: { type: 'string' },
+          slug: { 
+            type: 'string', 
+            minLength: 3, 
+            maxLength: 25, 
+            pattern: '^[a-z0-9-]+$' 
+          },
           description: { type: 'string' },
           shortCode: { type: 'string' },
           visibility: { type: 'string', enum: ['PUBLIC', 'UNLISTED', 'PRIVATE'] },
@@ -1055,11 +1104,48 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         return;
       }
 
-      // Generate unique slug
-      const existingSlugs = await prisma.ring.findMany({
-        select: { slug: true },
-      });
-      const slug = generateSlug(data.name, existingSlugs.map(r => r.slug));
+      // Handle custom slug or generate from name
+      let slug: string;
+      
+      if (data.slug) {
+        // Validate custom slug
+        if (data.slug.startsWith('-') || data.slug.endsWith('-')) {
+          reply.code(400).send({
+            error: 'Invalid slug',
+            message: 'Slug cannot start or end with a hyphen',
+          });
+          return;
+        }
+
+        if (data.slug.includes('--')) {
+          reply.code(400).send({
+            error: 'Invalid slug',
+            message: 'Slug cannot contain consecutive hyphens',
+          });
+          return;
+        }
+
+        // Check if custom slug is already taken
+        const existingRing = await prisma.ring.findUnique({
+          where: { slug: data.slug },
+        });
+
+        if (existingRing) {
+          reply.code(400).send({
+            error: 'Slug unavailable',
+            message: `Ring slug '${data.slug}' is already taken`,
+          });
+          return;
+        }
+
+        slug = data.slug;
+      } else {
+        // Generate unique slug from name
+        const existingSlugs = await prisma.ring.findMany({
+          select: { slug: true },
+        });
+        slug = generateSlug(data.name, existingSlugs.map(r => r.slug));
+      }
 
       // Create the fork
       const ring = await prisma.ring.create({
