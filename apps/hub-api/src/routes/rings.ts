@@ -77,6 +77,8 @@ async function buildRingResponse(
     createdAt: ring.createdAt.toISOString(),
     updatedAt: ring.updatedAt.toISOString(),
     curatorNote: ring.curatorNote,
+    badgeImageUrl: ring.badgeImageUrl,
+    badgeImageHighResUrl: ring.badgeImageHighResUrl,
     metadata: ring.metadata,
     policies: ring.policies,
   };
