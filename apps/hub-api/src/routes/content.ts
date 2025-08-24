@@ -61,13 +61,57 @@ export async function contentRoutes(fastify: FastifyInstance) {
           uri: { type: 'string', format: 'uri' },
           digest: { type: 'string' },
           actorDid: { type: 'string' },
-          metadata: { type: 'object' },
+          metadata: { 
+            type: 'object',
+            properties: {
+              title: { type: 'string', maxLength: 200 },
+              textPreview: { type: 'string', maxLength: 300 },
+              excerpt: { type: 'string', maxLength: 500 },
+              tags: { 
+                type: 'array', 
+                items: { type: 'string' },
+                maxItems: 10 
+              },
+              publishedAt: { type: 'string', format: 'date-time' },
+              platform: { type: 'string' },
+            },
+            additionalProperties: true,
+          },
         },
         required: ['ringSlug', 'uri', 'digest'],
       },
       tags: ['content'],
       summary: 'Submit content to a ring',
+      description: 'Submit content to a ThreadRing. Includes validation for metadata fields like textPreview (max 300 chars).',
       security: [{ httpSignature: [] }],
+      response: {
+        201: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            ringSlug: { type: 'string' },
+            uri: { type: 'string' },
+            digest: { type: 'string' },
+            actorDid: { type: 'string' },
+            submittedBy: { type: 'string' },
+            submittedAt: { type: 'string', format: 'date-time' },
+            status: { type: 'string', enum: ['PENDING', 'ACCEPTED'] },
+            moderatedAt: { type: 'string', format: 'date-time' },
+            moderatedBy: { type: 'string' },
+            metadata: {
+              type: 'object',
+              properties: {
+                title: { type: 'string' },
+                textPreview: { type: 'string' },
+                excerpt: { type: 'string' },
+                tags: { type: 'array', items: { type: 'string' } },
+                publishedAt: { type: 'string', format: 'date-time' },
+                platform: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
     },
   }, async (request, reply) => {
     try {
