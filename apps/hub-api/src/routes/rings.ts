@@ -618,6 +618,88 @@ export async function ringsRoutes(fastify: FastifyInstance) {
   });
 
   /**
+   * GET /trp/rings/check-availability/:slug - Check if ring slug is available
+   */
+  fastify.get<{ Params: { slug: string } }>('/rings/check-availability/:slug', {
+    schema: {
+      params: {
+        type: 'object',
+        properties: {
+          slug: { 
+            type: 'string',
+            minLength: 1,
+            maxLength: 63, // DNS subdomain limit
+            pattern: '^[a-z0-9-]+$' // Only lowercase letters, numbers, and hyphens
+          },
+        },
+        required: ['slug'],
+      },
+      tags: ['rings'],
+      summary: 'Check if ring slug is available',
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            available: { type: 'boolean' },
+            slug: { type: 'string' },
+            message: { type: 'string' },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+            message: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const { slug } = request.params;
+
+      // Additional validation for slug format
+      if (slug.startsWith('-') || slug.endsWith('-')) {
+        reply.code(400).send({
+          error: 'Invalid slug',
+          message: 'Slug cannot start or end with a hyphen',
+        });
+        return;
+      }
+
+      if (slug.includes('--')) {
+        reply.code(400).send({
+          error: 'Invalid slug',
+          message: 'Slug cannot contain consecutive hyphens',
+        });
+        return;
+      }
+
+      // Check if ring with this slug already exists
+      const existingRing = await prisma.ring.findUnique({
+        where: { slug },
+        select: { id: true, name: true, visibility: true },
+      });
+
+      const available = !existingRing;
+
+      reply.send({
+        available,
+        slug,
+        message: available 
+          ? `Ring slug '${slug}' is available`
+          : `Ring slug '${slug}' is already taken`,
+      });
+    } catch (error) {
+      logger.error({ error, slug: request.params.slug }, 'Failed to check ring availability');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to check ring availability',
+      });
+    }
+  });
+
+  /**
    * POST /trp/rings - Create a new ring
    */
   fastify.post<{ Body: CreateRingInput }>('/rings', {
