@@ -154,6 +154,13 @@ async function main() {
     prisma.ringRole.create({
       data: {
         ringId: techRing.id,
+        name: 'member',
+        permissions: ['view_content', 'submit_posts'],
+      },
+    }),
+    prisma.ringRole.create({
+      data: {
+        ringId: techRing.id,
         name: 'moderator',
         permissions: ['moderate_posts', 'manage_members', 'update_ring_info'],
       },
@@ -177,7 +184,7 @@ async function main() {
         ringId: techRing.id,
         actorDid: actors[0].did,
         status: 'ACTIVE',
-        roleId: roles[1].id, // curator role
+        roleId: roles[2].id, // curator role
       },
     }),
     // Bob is member of techRing and owner of solarRing
@@ -186,7 +193,7 @@ async function main() {
         ringId: techRing.id,
         actorDid: actors[1].did,
         status: 'ACTIVE',
-        roleId: roles[0].id, // moderator role
+        roleId: roles[1].id, // moderator role
       },
     }),
     prisma.membership.create({

@@ -60,8 +60,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
         where: { slug: ringSlug },
         include: {
           roles: {
-            where: { name: 'member' },
-            take: 1,
+            orderBy: { name: 'asc' },
           },
         },
       });
@@ -144,12 +143,16 @@ export async function membershipRoutes(fastify: FastifyInstance) {
           return;
       }
 
-      // Get default member role
-      const memberRole = ring.roles[0];
+      // Get default member role - prefer 'member' role, fallback to first available
+      let memberRole = ring.roles.find(role => role.name === 'member');
+      if (!memberRole && ring.roles.length > 0) {
+        memberRole = ring.roles[0]; // Use first available role as fallback
+      }
+      
       if (!memberRole) {
         reply.code(500).send({
           error: 'Configuration error',
-          message: 'Ring has no member role configured',
+          message: 'Ring has no roles configured',
         });
         return;
       }

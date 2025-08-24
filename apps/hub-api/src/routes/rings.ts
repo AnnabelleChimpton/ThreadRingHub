@@ -873,20 +873,29 @@ export async function ringsRoutes(fastify: FastifyInstance) {
       });
 
       // Create default roles (copy from parent if desired)
-      const ownerRole = await prisma.ringRole.create({
-        data: {
-          ringId: ring.id,
-          name: 'owner',
-          permissions: [
-            'manage_ring',
-            'manage_members',
-            'manage_roles',
-            'moderate_posts',
-            'update_ring_info',
-            'delete_ring',
-          ],
-        },
-      });
+      const [ownerRole] = await Promise.all([
+        prisma.ringRole.create({
+          data: {
+            ringId: ring.id,
+            name: 'owner',
+            permissions: [
+              'manage_ring',
+              'manage_members',
+              'manage_roles',
+              'moderate_posts',
+              'update_ring_info',
+              'delete_ring',
+            ],
+          },
+        }),
+        prisma.ringRole.create({
+          data: {
+            ringId: ring.id,
+            name: 'member',
+            permissions: ['submit_posts', 'view_content'],
+          },
+        }),
+      ]);
 
       // Add owner as member
       await prisma.membership.create({
