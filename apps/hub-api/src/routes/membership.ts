@@ -696,4 +696,200 @@ export async function membershipRoutes(fastify: FastifyInstance) {
       });
     }
   });
+
+  /**
+   * GET /trp/actors/:did/badges - Get all badges for an actor
+   * Returns all active badges associated with the actor's DID
+   * This is a public endpoint - no authentication required
+   */
+  fastify.get<{ 
+    Params: { did: string };
+    Querystring: { 
+      status?: 'active' | 'revoked' | 'all';
+      limit?: number;
+      offset?: number;
+    };
+  }>('/actors/:did/badges', {
+    schema: {
+      params: {
+        type: 'object',
+        properties: {
+          did: { type: 'string' },
+        },
+        required: ['did'],
+      },
+      querystring: {
+        type: 'object',
+        properties: {
+          status: { 
+            type: 'string', 
+            enum: ['active', 'revoked', 'all'],
+            default: 'active'
+          },
+          limit: { 
+            type: 'number', 
+            minimum: 1, 
+            maximum: 100, 
+            default: 20 
+          },
+          offset: { 
+            type: 'number', 
+            minimum: 0, 
+            default: 0 
+          },
+        },
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            badges: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  badge: { type: 'object' }, // Full badge JSON-LD
+                  ring: {
+                    type: 'object',
+                    properties: {
+                      slug: { type: 'string' },
+                      name: { type: 'string' },
+                      visibility: { type: 'string' },
+                    },
+                  },
+                  membership: {
+                    type: 'object',
+                    properties: {
+                      role: { type: 'string', nullable: true },
+                      joinedAt: { type: 'string', nullable: true },
+                      status: { type: 'string' },
+                    },
+                  },
+                  issuedAt: { type: 'string' },
+                  isRevoked: { type: 'boolean' },
+                  revokedAt: { type: 'string', nullable: true },
+                  revocationReason: { type: 'string', nullable: true },
+                },
+              },
+            },
+            total: { type: 'number' },
+            limit: { type: 'number' },
+            offset: { type: 'number' },
+            hasMore: { type: 'boolean' },
+          },
+        },
+      },
+      tags: ['badges'],
+      summary: 'Get all badges for an actor',
+    },
+  }, async (request, reply) => {
+    const { did } = request.params;
+    const { status = 'active', limit = 20, offset = 0 } = request.query;
+    const logger = request.log;
+
+    try {
+      // Build the where clause based on status filter
+      let badgeWhere: any = {};
+      let membershipWhere: any = {
+        actorDid: did,
+      };
+
+      switch (status) {
+        case 'active':
+          badgeWhere.revokedAt = null;
+          membershipWhere.status = 'ACTIVE';
+          break;
+        case 'revoked':
+          badgeWhere.revokedAt = { not: null };
+          break;
+        case 'all':
+          // No additional filters
+          break;
+      }
+
+      // Get badges with their associated membership and ring data
+      const [badges, totalCount] = await Promise.all([
+        prisma.badge.findMany({
+          where: {
+            ...badgeWhere,
+            membership: membershipWhere,
+          },
+          include: {
+            membership: {
+              include: {
+                ring: {
+                  select: {
+                    slug: true,
+                    name: true,
+                    visibility: true,
+                  },
+                },
+                role: {
+                  select: {
+                    name: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: {
+            issuedAt: 'desc',
+          },
+          take: limit,
+          skip: offset,
+        }),
+        prisma.badge.count({
+          where: {
+            ...badgeWhere,
+            membership: membershipWhere,
+          },
+        }),
+      ]);
+
+      // Filter out badges from private rings unless the requester is a member
+      // For now, we'll include all badges but this could be enhanced with authentication
+      const accessibleBadges = badges.filter(badge => {
+        const ring = badge.membership.ring;
+        // Always show PUBLIC and UNLISTED rings
+        // For PRIVATE rings, ideally we'd check if requester is a member
+        return ring.visibility !== 'PRIVATE';
+      });
+
+      // Format the response
+      const formattedBadges = accessibleBadges.map(badge => ({
+        badge: badge.badgeData,
+        ring: {
+          slug: badge.membership.ring.slug,
+          name: badge.membership.ring.name,
+          visibility: badge.membership.ring.visibility,
+        },
+        membership: {
+          role: badge.membership.role?.name || null,
+          joinedAt: badge.membership.joinedAt?.toISOString() || null,
+          status: badge.membership.status,
+        },
+        issuedAt: badge.issuedAt.toISOString(),
+        isRevoked: badge.revokedAt !== null,
+        revokedAt: badge.revokedAt?.toISOString() || null,
+        revocationReason: badge.revocationReason || null,
+      }));
+
+      reply.send({
+        badges: formattedBadges,
+        total: accessibleBadges.length,
+        limit,
+        offset,
+        hasMore: offset + limit < accessibleBadges.length,
+      });
+    } catch (error) {
+      logger.error({ 
+        error: error instanceof Error ? error.message : String(error),
+        did 
+      }, 'Failed to get actor badges');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to retrieve actor badges',
+      });
+    }
+  });
 }
