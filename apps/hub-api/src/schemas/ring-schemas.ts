@@ -19,6 +19,8 @@ export const CreateRingSchema = z.object({
   postPolicy: PostPolicySchema.default('OPEN'),
   parentSlug: z.string().optional(), // For creating forks
   curatorNote: z.string().max(1000).optional(),
+  badgeImageUrl: z.string().url().optional(), // 88x31 badge image URL
+  badgeImageHighResUrl: z.string().url().optional(), // 352x124 high-res badge image URL
   metadata: z.record(z.any()).optional(),
   policies: z.record(z.any()).optional(),
 });
@@ -32,6 +34,8 @@ export const UpdateRingSchema = z.object({
   joinPolicy: JoinPolicySchema.optional(),
   postPolicy: PostPolicySchema.optional(),
   curatorNote: z.string().max(1000).optional(),
+  badgeImageUrl: z.string().url().optional(), // 88x31 badge image URL
+  badgeImageHighResUrl: z.string().url().optional(), // 352x124 high-res badge image URL
   metadata: z.record(z.any()).optional(),
   policies: z.record(z.any()).optional(),
 });
@@ -69,6 +73,8 @@ export const ForkRingSchema = z.object({
   joinPolicy: JoinPolicySchema.default('OPEN'),
   postPolicy: PostPolicySchema.default('OPEN'),
   curatorNote: z.string().max(1000).optional(),
+  badgeImageUrl: z.string().url().optional(), // 88x31 badge image URL
+  badgeImageHighResUrl: z.string().url().optional(), // 352x124 high-res badge image URL
   metadata: z.record(z.any()).optional(),
 });
 

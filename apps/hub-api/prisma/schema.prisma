@@ -38,6 +38,10 @@ model Ring {
   policies    Json?    // Ring-specific policies
   curatorNote String?  // Curator's description/rules
   
+  // Badge images (provided by ring owner)
+  badgeImageUrl    String?  // 88x31 badge image URL
+  badgeImageHighResUrl String?  // 352x124 high-res badge image URL (optional)
+  
   // Relations
   roles       RingRole[]
   memberships Membership[]

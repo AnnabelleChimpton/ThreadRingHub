@@ -25,6 +25,8 @@ export interface ThreadRingBadge {
       type: string[];
       name: string;
       description: string;
+      image?: string; // 88x31 badge image URL
+      imageHighRes?: string; // 352x124 high-res badge image URL (optional)
       criteria: {
         narrative: string;
       };
@@ -60,7 +62,9 @@ export async function generateBadge(
   actorName: string,
   role: string,
   privateKey: crypto.KeyObject,
-  ringHubUrl: string
+  ringHubUrl: string,
+  badgeImageUrl?: string,
+  badgeImageHighResUrl?: string
 ): Promise<ThreadRingBadge> {
   const badgeId = nanoid();
   const issuanceDate = new Date().toISOString();
@@ -88,6 +92,8 @@ export async function generateBadge(
         type: ['Achievement'],
         name: `${ringName} Member`,
         description: `Verified member of the ${ringName} ThreadRing community with ${role} privileges`,
+        ...(badgeImageUrl && { image: badgeImageUrl }),
+        ...(badgeImageHighResUrl && { imageHighRes: badgeImageHighResUrl }),
         criteria: {
           narrative: `Membership verified through cryptographic authentication and Ring Hub consensus`
         }
