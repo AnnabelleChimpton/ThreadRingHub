@@ -269,6 +269,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
           since: { type: 'string' },
           until: { type: 'string' },
           pinned: { type: 'boolean' },
+          scope: { type: 'string', enum: ['ring', 'children', 'family'], default: 'ring' },
         },
       },
       tags: ['content'],
@@ -277,7 +278,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
   }, async (request, reply) => {
     try {
       const { slug } = request.params;
-      const { limit, offset, status, actorDid, since, until, pinned } = request.query;
+      const { limit, offset, status, actorDid, since, until, pinned, scope } = request.query;
 
       // Find the ring
       const ring = await prisma.ring.findUnique({
@@ -320,18 +321,56 @@ export async function contentRoutes(fastify: FastifyInstance) {
         }
       }
 
+      // Build ring IDs based on scope
+      let ringIds: string[] = [ring.id];
+      
+      if (scope === 'children') {
+        // Get all direct children
+        const children = await prisma.ring.findMany({
+          where: { parentId: ring.id },
+          select: { id: true },
+        });
+        ringIds = children.map(child => child.id);
+      } else if (scope === 'family') {
+        // Get all descendants (children and their children recursively)
+        const getAllDescendants = async (parentId: string): Promise<string[]> => {
+          const children = await prisma.ring.findMany({
+            where: { parentId },
+            select: { id: true },
+          });
+          
+          let allIds = children.map(child => child.id);
+          
+          // Recursively get descendants
+          for (const child of children) {
+            const descendants = await getAllDescendants(child.id);
+            allIds = allIds.concat(descendants);
+          }
+          
+          return allIds;
+        };
+        
+        const descendants = await getAllDescendants(ring.id);
+        ringIds = [ring.id, ...descendants]; // Include current ring + all descendants
+      }
+      
       // Build query filters
-      const where: any = { ringId: ring.id };
+      const where: any = { 
+        ringId: ringIds.length === 1 ? ringIds[0] : { in: ringIds }
+      };
 
       // Show posts based on authentication and membership
       if (!request.actor) {
         // Non-authenticated users only see accepted posts
         where.status = 'ACCEPTED';
       } else {
-        // Check if authenticated user is a member
+        // For scope other than 'ring', check membership of the requested ring
+        // For 'ring' scope, check membership of the specific ring
+        let membershipCheckRingId = ring.id;
+        
         const membership = await prisma.membership.findFirst({
           where: {
-            ringId: ring.id,
+            ringId: membershipCheckRingId,
             actorDid: request.actor.did,
             status: 'ACTIVE',
           },
