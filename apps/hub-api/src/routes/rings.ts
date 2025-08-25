@@ -10,6 +10,7 @@ import {
   requirePermission,
   auditLogger 
 } from '../security/middleware';
+import { rateLimit, recordRateLimitUsage } from '../middleware/rate-limit';
 import {
   CreateRingSchema,
   UpdateRingSchema,
@@ -1057,7 +1058,11 @@ export async function ringsRoutes(fastify: FastifyInstance) {
    * POST /trp/fork - Fork a ring
    */
   fastify.post<{ Body: ForkRingInput & { parentSlug: string } }>('/fork', {
-    preHandler: [authenticateActor, requireVerifiedActor],
+    preHandler: [
+      authenticateActor, 
+      requireVerifiedActor, 
+      rateLimit({ action: 'fork_ring' })
+    ],
     schema: {
       body: {
         type: 'object',
@@ -1223,6 +1228,9 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         parentSlug: parentRing.slug,
         forkedBy: actorDid,
       }, 'Ring forked');
+
+      // Record rate limit usage
+      await recordRateLimitUsage(request, 'fork_ring', { ringId: ring.id });
 
       const response = await buildRingResponse(ring, true, false);
       reply.code(201).send(response);

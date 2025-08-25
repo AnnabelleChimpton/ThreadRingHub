@@ -12,6 +12,7 @@ import { connectRedis, disconnectRedis, checkRedisHealth } from './database/redi
 import { ringsRoutes } from './routes/rings';
 import { membershipRoutes } from './routes/membership';
 import { contentRoutes } from './routes/content';
+import { adminRoutes } from './routes/admin';
 
 async function buildApp() {
   const fastify = Fastify({
@@ -58,6 +59,7 @@ async function buildApp() {
         { name: 'badges', description: 'Badge issuance and verification' },
         { name: 'content', description: 'Content submission and curation' },
         { name: 'federation', description: 'Federation and ActivityPub' },
+        { name: 'admin', description: 'Administrative operations' },
       ],
     },
   });
@@ -108,6 +110,7 @@ async function buildApp() {
   await fastify.register(ringsRoutes, { prefix: '/trp' });
   await fastify.register(membershipRoutes, { prefix: '/trp' });
   await fastify.register(contentRoutes, { prefix: '/trp' });
+  await fastify.register(adminRoutes, { prefix: '/admin' });
 
   // Graceful shutdown
   const closeGracefully = async (signal: string) => {

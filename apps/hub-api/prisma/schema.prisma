@@ -321,6 +321,7 @@ model Actor {
   // Trust and verification
   verified  Boolean  @default(false)
   trusted   Boolean  @default(false)
+  isAdmin   Boolean  @default(false)  // Bypass rate limits
   
   // Timestamps
   discoveredAt DateTime @default(now())
@@ -338,4 +339,59 @@ enum ActorType {
   USER      // Individual user
   SERVICE   // Service/bot account
   INSTANCE  // Instance/server actor
+}
+
+// Rate limiting for actions
+model RateLimit {
+  id        String   @id @default(uuid())
+  actorDid  String   // Who performed the action
+  action    String   // Action type (e.g., "fork_ring")
+  
+  // Time windows
+  performedAt DateTime @default(now())
+  windowType  String   // "hour", "day", "week"
+  
+  // Context
+  metadata    Json?    // Additional context (e.g., ringId)
+  
+  @@index([actorDid, action, performedAt])
+  @@index([actorDid, action, windowType, performedAt])
+}
+
+// User reputation/tier tracking
+model ActorReputation {
+  id              String   @id @default(uuid())
+  actorDid        String   @unique
+  
+  // Calculated fields
+  tier            UserTier @default(NEW)
+  reputationScore Int      @default(0)
+  
+  // Activity metrics
+  ringsCreated    Int      @default(0)
+  activeRings     Int      @default(0) // Rings with >0 posts
+  totalPosts      Int      @default(0)
+  membershipCount Int      @default(0)
+  
+  // Moderation flags
+  flaggedForReview Boolean  @default(false)
+  violationCount   Int      @default(0)
+  lastViolationAt  DateTime?
+  cooldownUntil    DateTime? // Rate limit cool-down period
+  
+  // Timestamps
+  lastCalculatedAt DateTime @default(now())
+  createdAt       DateTime @default(now())
+  
+  @@index([tier])
+  @@index([reputationScore])
+  @@index([flaggedForReview])
+  @@index([cooldownUntil])
+}
+
+enum UserTier {
+  NEW         // < 7 days
+  ESTABLISHED // 7-30 days  
+  VETERAN     // 30+ days
+  TRUSTED     // High reputation + good standing
 }
