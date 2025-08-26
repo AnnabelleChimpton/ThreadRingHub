@@ -292,19 +292,41 @@ export class RateLimitingService {
     const recentRing = await prisma.ring.findFirst({
       where: { ownerDid: actorDid },
       orderBy: { createdAt: 'desc' },
-      include: {
-        _count: {
-          select: {
-            postRefs: {
-              where: { status: 'ACCEPTED' }
+    });
+
+    // If no rings exist, allow fork
+    if (!recentRing) {
+      return { passed: true };
+    }
+
+    // Count non-notification posts
+    const realPostCount = await prisma.postRef.count({
+      where: {
+        ringId: recentRing.id,
+        status: 'ACCEPTED',
+        OR: [
+          // Posts without metadata
+          { metadata: { equals: prisma.Prisma.JsonNull } },
+          // Posts with metadata but no type field
+          { 
+            metadata: {
+              path: ['type'],
+              equals: prisma.Prisma.JsonNull
+            }
+          },
+          // Posts with type that is not fork_notification
+          {
+            metadata: {
+              path: ['type'],
+              not: 'fork_notification'
             }
           }
-        }
+        ]
       }
     });
 
-    // If no rings exist, or if the most recent ring has posts, allow fork
-    if (!recentRing || recentRing._count.postRefs > 0) {
+    // If the most recent ring has real posts, allow fork
+    if (realPostCount > 0) {
       return { passed: true };
     }
 

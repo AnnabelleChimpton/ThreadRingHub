@@ -387,6 +387,390 @@ export async function ringsRoutes(fastify: FastifyInstance) {
   });
 
   /**
+   * GET /trp/my/feed - Get unified feed from all rings user is member of
+   */
+  fastify.get<{ 
+    Querystring: { 
+      limit?: number; 
+      offset?: number; 
+      since?: string;
+      until?: string;
+      includeNotifications?: boolean;
+      ringId?: string;
+      sort?: 'newest' | 'oldest';
+    } 
+  }>('/my/feed', {
+    preHandler: [authenticateActor],
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', minimum: 1, maximum: 100, default: 20 },
+          offset: { type: 'number', minimum: 0, default: 0 },
+          since: { type: 'string', format: 'date-time' },
+          until: { type: 'string', format: 'date-time' },
+          includeNotifications: { type: 'boolean', default: true },
+          ringId: { type: 'string' },
+          sort: { type: 'string', enum: ['newest', 'oldest'], default: 'newest' }
+        },
+      },
+      tags: ['feeds'],
+      summary: 'Get unified feed from all rings user is member of',
+      security: [{ httpSignature: [] }],
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            posts: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  ringId: { type: 'string' },
+                  ringSlug: { type: 'string' },
+                  ringName: { type: 'string' },
+                  actorDid: { type: 'string' },
+                  actorName: { type: 'string', nullable: true },
+                  uri: { type: 'string' },
+                  digest: { type: 'string' },
+                  submittedAt: { type: 'string' },
+                  submittedBy: { type: 'string' },
+                  status: { type: 'string' },
+                  metadata: { type: 'object', nullable: true },
+                  pinned: { type: 'boolean' },
+                  isNotification: { type: 'boolean' },
+                  notificationType: { type: 'string', nullable: true },
+                },
+              },
+            },
+            pagination: {
+              type: 'object',
+              properties: {
+                total: { type: 'number' },
+                limit: { type: 'number' },
+                offset: { type: 'number' },
+                hasMore: { type: 'boolean' },
+              },
+            },
+            generatedAt: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      if (!request.actor) {
+        reply.code(401).send({
+          error: 'Authentication required',
+          message: 'Must be authenticated to view your feed',
+        });
+        return;
+      }
+
+      const actorDid = request.actor.did;
+      const { 
+        limit = 20, 
+        offset = 0, 
+        since, 
+        until,
+        includeNotifications = true,
+        ringId,
+        sort = 'newest'
+      } = request.query;
+
+      // Get all active memberships for the user
+      const memberships = await prisma.membership.findMany({
+        where: {
+          actorDid,
+          status: 'ACTIVE'
+        },
+        select: { ringId: true }
+      });
+
+      const memberRingIds = memberships.map(m => m.ringId);
+
+      if (memberRingIds.length === 0) {
+        // User is not a member of any rings
+        reply.send({
+          posts: [],
+          pagination: {
+            total: 0,
+            limit,
+            offset,
+            hasMore: false
+          },
+          generatedAt: new Date().toISOString()
+        });
+        return;
+      }
+
+      // Build where clause
+      const where: any = {
+        ringId: { in: memberRingIds },
+        status: 'ACCEPTED'
+      };
+
+      // Filter by specific ring if provided
+      if (ringId && memberRingIds.includes(ringId)) {
+        where.ringId = ringId;
+      }
+
+      // Date filters
+      if (since) {
+        where.submittedAt = { ...where.submittedAt, gte: new Date(since) };
+      }
+      if (until) {
+        where.submittedAt = { ...where.submittedAt, lte: new Date(until) };
+      }
+
+      // Exclude notifications if requested
+      if (!includeNotifications) {
+        where.OR = [
+          { metadata: { equals: prisma.Prisma.JsonNull } },
+          { 
+            metadata: {
+              path: ['type'],
+              not: 'fork_notification'
+            }
+          }
+        ];
+      }
+
+      // Get posts with ring info
+      const [posts, total] = await Promise.all([
+        prisma.postRef.findMany({
+          where,
+          include: {
+            ring: {
+              select: {
+                slug: true,
+                name: true
+              }
+            }
+          },
+          take: limit,
+          skip: offset,
+          orderBy: {
+            submittedAt: sort === 'newest' ? 'desc' : 'asc'
+          }
+        }),
+        prisma.postRef.count({ where })
+      ]);
+
+      // Get actor names
+      const actorDids = [...new Set(posts.map(p => p.actorDid))];
+      const actors = await prisma.actor.findMany({
+        where: { did: { in: actorDids } },
+        select: { did: true, name: true }
+      });
+      
+      const actorNameMap = new Map(actors.map(a => [a.did, a.name]));
+
+      // Format response
+      const formattedPosts = posts.map(post => {
+        const metadata = post.metadata as any;
+        return {
+          id: post.id,
+          ringId: post.ringId,
+          ringSlug: post.ring.slug,
+          ringName: post.ring.name,
+          actorDid: post.actorDid,
+          actorName: actorNameMap.get(post.actorDid) || null,
+          uri: post.uri,
+          digest: post.digest,
+          submittedAt: post.submittedAt.toISOString(),
+          submittedBy: post.submittedBy,
+          status: post.status,
+          metadata: post.metadata,
+          pinned: post.pinned,
+          isNotification: metadata?.type === 'fork_notification',
+          notificationType: metadata?.type || null
+        };
+      });
+
+      reply.send({
+        posts: formattedPosts,
+        pagination: {
+          total,
+          limit,
+          offset,
+          hasMore: offset + limit < total
+        },
+        generatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error({ error }, 'Failed to get user feed');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to retrieve feed',
+      });
+    }
+  });
+
+  /**
+   * GET /trp/trending/feed - Get trending posts across all public rings
+   */
+  fastify.get<{ 
+    Querystring: { 
+      limit?: number; 
+      timeWindow?: 'hour' | 'day' | 'week';
+      includeNotifications?: boolean;
+    } 
+  }>('/trending/feed', {
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', minimum: 1, maximum: 50, default: 20 },
+          timeWindow: { type: 'string', enum: ['hour', 'day', 'week'], default: 'day' },
+          includeNotifications: { type: 'boolean', default: true },
+        },
+      },
+      tags: ['feeds'],
+      summary: 'Get trending posts across all public rings',
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            posts: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  ringId: { type: 'string' },
+                  ringSlug: { type: 'string' },
+                  ringName: { type: 'string' },
+                  actorDid: { type: 'string' },
+                  actorName: { type: 'string', nullable: true },
+                  uri: { type: 'string' },
+                  digest: { type: 'string' },
+                  submittedAt: { type: 'string' },
+                  submittedBy: { type: 'string' },
+                  status: { type: 'string' },
+                  metadata: { type: 'object', nullable: true },
+                  pinned: { type: 'boolean' },
+                  isNotification: { type: 'boolean' },
+                  notificationType: { type: 'string', nullable: true },
+                },
+              },
+            },
+            timeWindow: { type: 'string' },
+            generatedAt: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const { 
+        limit = 20, 
+        timeWindow = 'day',
+        includeNotifications = true
+      } = request.query;
+
+      // Calculate time cutoff
+      const now = new Date();
+      const cutoff = new Date();
+      switch (timeWindow) {
+        case 'hour':
+          cutoff.setHours(now.getHours() - 1);
+          break;
+        case 'day':
+          cutoff.setDate(now.getDate() - 1);
+          break;
+        case 'week':
+          cutoff.setDate(now.getDate() - 7);
+          break;
+      }
+
+      // Build where clause - only public rings
+      const where: any = {
+        status: 'ACCEPTED',
+        submittedAt: { gte: cutoff },
+        ring: {
+          visibility: 'PUBLIC'
+        }
+      };
+
+      // Exclude notifications if requested
+      if (!includeNotifications) {
+        where.OR = [
+          { metadata: { equals: prisma.Prisma.JsonNull } },
+          { 
+            metadata: {
+              path: ['type'],
+              not: 'fork_notification'
+            }
+          }
+        ];
+      }
+
+      // Get trending posts (for now, just recent posts from public rings)
+      // In production, you might want to add engagement metrics
+      const posts = await prisma.postRef.findMany({
+        where,
+        include: {
+          ring: {
+            select: {
+              slug: true,
+              name: true
+            }
+          }
+        },
+        take: limit,
+        orderBy: {
+          submittedAt: 'desc'
+        }
+      });
+
+      // Get actor names
+      const actorDids = [...new Set(posts.map(p => p.actorDid))];
+      const actors = await prisma.actor.findMany({
+        where: { did: { in: actorDids } },
+        select: { did: true, name: true }
+      });
+      
+      const actorNameMap = new Map(actors.map(a => [a.did, a.name]));
+
+      // Format response
+      const formattedPosts = posts.map(post => {
+        const metadata = post.metadata as any;
+        return {
+          id: post.id,
+          ringId: post.ringId,
+          ringSlug: post.ring.slug,
+          ringName: post.ring.name,
+          actorDid: post.actorDid,
+          actorName: actorNameMap.get(post.actorDid) || null,
+          uri: post.uri,
+          digest: post.digest,
+          submittedAt: post.submittedAt.toISOString(),
+          submittedBy: post.submittedBy,
+          status: post.status,
+          metadata: post.metadata,
+          pinned: post.pinned,
+          isNotification: metadata?.type === 'fork_notification',
+          notificationType: metadata?.type || null
+        };
+      });
+
+      reply.send({
+        posts: formattedPosts,
+        timeWindow,
+        generatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error({ error }, 'Failed to get trending feed');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to retrieve trending feed',
+      });
+    }
+  });
+
+  /**
    * GET /trp/rings - List and search rings
    */
   fastify.get<{ Querystring: RingQueryInput }>('/rings', {
