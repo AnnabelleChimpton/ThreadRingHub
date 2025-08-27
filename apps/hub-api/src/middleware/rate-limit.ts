@@ -101,7 +101,16 @@ export function rateLimit(options: RateLimitOptions) {
       (request as any).rateLimitResult = rateLimitResult;
 
     } catch (error) {
-      logger.error({ error, actorDid, action: options.action }, 'Rate limiting check failed');
+      logger.error({ 
+        error: {
+          message: error?.message || 'Unknown error',
+          stack: error?.stack || 'No stack trace',
+          name: error?.name || 'Unknown error type',
+          cause: error?.cause || 'No cause'
+        }, 
+        actorDid, 
+        action: options.action 
+      }, 'Rate limiting check failed');
       
       // On rate limiting service failure, allow the request through
       // but log the error for monitoring
