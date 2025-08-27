@@ -109,7 +109,8 @@ echo -e "${GREEN}Step 5: Creating root ThreadRing '${ROOT_RING_SLUG}'...${NC}"
 
 # Create the root ring via API call
 echo "Creating root ring via internal API..."
-docker-compose exec hub-api sh -c "cd /app && node scripts/create-root-ring.js"
+cp scripts/create-root-ring.js apps/hub-api/
+docker-compose exec hub-api sh -c "cd /app/apps/hub-api && node create-root-ring.js"
 
 # Step 6: Restart services to ensure clean state
 echo -e "${GREEN}Step 6: Restarting services...${NC}"
