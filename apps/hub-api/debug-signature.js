@@ -1,4 +1,9 @@
-const { verify } = require('@noble/ed25519');
+const ed = require('@noble/ed25519');
+const { sha512 } = require('@noble/hashes/sha512');
+const { concatBytes } = require('@noble/hashes/utils');
+
+// Configure SHA-512 for @noble/ed25519
+ed.etc.sha512Sync = (...m) => sha512(concatBytes(...m));
 
 // Test data from the logs
 const testCase = {
@@ -31,7 +36,7 @@ async function debugSignature() {
     
     // Test verification
     console.log('Testing verification...');
-    const isValid = await verify(signatureBytes, messageBytes, pubKeyBytes);
+    const isValid = await ed.verify(signatureBytes, messageBytes, pubKeyBytes);
     console.log('Verification Result:', isValid);
     
     if (!isValid) {
@@ -42,12 +47,12 @@ async function debugSignature() {
       
       // Test with Buffer.from instead of TextEncoder
       const messageBytes2 = Buffer.from(testCase.signingString, 'utf8');
-      const isValid2 = await verify(signatureBytes, messageBytes2, pubKeyBytes);
+      const isValid2 = await ed.verify(signatureBytes, messageBytes2, pubKeyBytes);
       console.log('With Buffer.from utf8:', isValid2);
       
       // Test with latin1 encoding
       const messageBytes3 = Buffer.from(testCase.signingString, 'latin1');
-      const isValid3 = await verify(signatureBytes, messageBytes3, pubKeyBytes);
+      const isValid3 = await ed.verify(signatureBytes, messageBytes3, pubKeyBytes);
       console.log('With latin1 encoding:', isValid3);
       
       // Check if there are any non-printable characters

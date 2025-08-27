@@ -7,7 +7,8 @@ import { logger } from '../utils/logger';
 import { resolveDID, extractPublicKey } from './did-resolver';
 
 // Configure SHA-512 for @noble/ed25519
-ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
+import { concatBytes } from '@noble/hashes/utils';
+ed.etc.sha512Sync = (...m) => sha512(concatBytes(...m));
 
 interface SignatureComponents {
   keyId: string;
