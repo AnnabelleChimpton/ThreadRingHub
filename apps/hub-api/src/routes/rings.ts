@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { nanoid } from 'nanoid';
 import { prisma } from '../database/prisma';
+import { Prisma } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { 
   authenticateActor, 
@@ -527,7 +528,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
       // Exclude notifications if requested
       if (!includeNotifications) {
         where.OR = [
-          { metadata: { equals: prisma.Prisma.JsonNull } },
+          { metadata: { equals: Prisma.JsonNull } },
           { 
             metadata: {
               path: ['type'],
@@ -697,7 +698,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
       // Exclude notifications if requested
       if (!includeNotifications) {
         where.OR = [
-          { metadata: { equals: prisma.Prisma.JsonNull } },
+          { metadata: { equals: Prisma.JsonNull } },
           { 
             metadata: {
               path: ['type'],

@@ -1,4 +1,5 @@
 import { prisma } from '../database/prisma';
+import { Prisma } from '@prisma/client';
 import { logger } from '../utils/logger';
 
 export interface RateLimitConfig {
@@ -306,12 +307,12 @@ export class RateLimitingService {
         status: 'ACCEPTED',
         OR: [
           // Posts without metadata
-          { metadata: { equals: prisma.Prisma.JsonNull } },
+          { metadata: { equals: Prisma.JsonNull } },
           // Posts with metadata but no type field
           { 
             metadata: {
               path: ['type'],
-              equals: prisma.Prisma.JsonNull
+              equals: Prisma.JsonNull
             }
           },
           // Posts with type that is not fork_notification
