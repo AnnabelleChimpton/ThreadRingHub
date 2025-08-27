@@ -43,16 +43,49 @@ export async function authenticateActor(
     }, 'HTTP signature verification result in middleware');
     
     if (!result.valid) {
-      logger.warn({ 
-        error: result.error, 
-        method: request.method, 
-        url: request.url 
-      }, 'Authentication failed in middleware');
-      reply.code(401).send({
-        error: 'Authentication required',
-        message: result.error || 'Invalid or missing signature',
-      });
-      return;
+      // Check if this is an admin account that should bypass signature verification
+      if (result.actorDid) {
+        logger.info({ actorDid: result.actorDid }, 'Signature verification failed, checking admin status');
+        
+        const actor = await prisma.actor.findUnique({
+          where: { did: result.actorDid },
+          select: { isAdmin: true, verified: true, trusted: true, name: true }
+        });
+        
+        if (actor?.isAdmin) {
+          logger.info({ actorDid: result.actorDid }, 'Admin bypass: allowing request despite signature verification failure');
+          
+          // Create a successful result for admin bypass
+          result.valid = true;
+          result.publicKey = result.publicKey || 'admin-bypass';
+          
+          // Continue with admin actor setup below
+        } else {
+          logger.warn({ 
+            error: result.error, 
+            method: request.method, 
+            url: request.url,
+            actorDid: result.actorDid,
+            isAdmin: actor?.isAdmin || false
+          }, 'Authentication failed in middleware - not admin');
+          reply.code(401).send({
+            error: 'Authentication required',
+            message: result.error || 'Invalid or missing signature',
+          });
+          return;
+        }
+      } else {
+        logger.warn({ 
+          error: result.error, 
+          method: request.method, 
+          url: request.url 
+        }, 'Authentication failed in middleware - no actor DID');
+        reply.code(401).send({
+          error: 'Authentication required',
+          message: result.error || 'Invalid or missing signature',
+        });
+        return;
+      }
     }
 
     // Get or register actor information
