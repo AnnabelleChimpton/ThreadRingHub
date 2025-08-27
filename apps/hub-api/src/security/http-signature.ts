@@ -181,7 +181,7 @@ async function verifyEd25519Signature(
     // Decode base64 public key and signature
     const pubKeyBytes = Buffer.from(publicKey, 'base64');
     const signatureBytes = Buffer.from(signature, 'base64');
-    const messageBytes = new TextEncoder().encode(message);
+    const messageBytes = Buffer.from(message, 'utf8');
     
     logger.info({
       publicKeyLength: pubKeyBytes.length,
