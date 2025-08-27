@@ -90,26 +90,26 @@ echo ""
 
 # Step 1: Clear Redis cache and sessions
 echo -e "${GREEN}Step 1: Clearing Redis cache and sessions...${NC}"
-docker-compose exec ringhub-redis redis-cli FLUSHALL
+docker-compose exec redis redis-cli FLUSHALL
 
 # Step 2: Drop all tables (complete wipe)
 echo -e "${GREEN}Step 2: Dropping all database tables...${NC}"
-docker-compose exec ringhub-api sh -c "cd /app/apps/hub-api && npx prisma db push --force-reset --accept-data-loss"
+docker-compose exec hub-api sh -c "cd /app/apps/hub-api && npx prisma db push --force-reset --accept-data-loss"
 
 # Step 3: Recreate schema
 echo -e "${GREEN}Step 3: Recreating database schema...${NC}"
-docker-compose exec ringhub-api sh -c "cd /app/apps/hub-api && npx prisma db push"
+docker-compose exec hub-api sh -c "cd /app/apps/hub-api && npx prisma db push"
 
 # Step 4: Generate fresh Prisma client
 echo -e "${GREEN}Step 4: Generating fresh Prisma client...${NC}"
-docker-compose exec ringhub-api sh -c "cd /app/apps/hub-api && npx prisma generate"
+docker-compose exec hub-api sh -c "cd /app/apps/hub-api && npx prisma generate"
 
 # Step 5: Create root ThreadRing
 echo -e "${GREEN}Step 5: Creating root ThreadRing '${ROOT_RING_SLUG}'...${NC}"
 
 # Create the root ring via API call
 echo "Creating root ring via internal API..."
-docker-compose exec ringhub-api sh -c "cd /app/apps/hub-api && node -e \"
+docker-compose exec hub-api sh -c "cd /app/apps/hub-api && node -e \"
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
@@ -190,7 +190,7 @@ createRootRing();
 
 # Step 6: Restart services to ensure clean state
 echo -e "${GREEN}Step 6: Restarting services...${NC}"
-docker-compose restart ringhub-api ringhub-redis
+docker-compose restart hub-api redis
 
 # Wait for services to come back up
 echo "Waiting for services to restart..."
