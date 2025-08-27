@@ -352,6 +352,14 @@ export async function verifyHttpSignature(
     }, 'Verifying signature with details');
     
     // Verify signature
+    // Get actor DID from key BEFORE verification (so it's available even if verification fails)
+    const key = await prisma.httpSignature.findUnique({
+      where: { keyId: components.keyId },
+      select: { actorDid: true },
+    });
+    
+    const actorDid = key?.actorDid || components.keyId.split('#')[0];
+    
     const valid = await verifyEd25519Signature(
       publicKey,
       signingString,
@@ -362,16 +370,14 @@ export async function verifyHttpSignature(
     
     if (!valid) {
       logger.warn({ keyId: components.keyId }, 'HTTP signature verification failed - invalid signature');
-      return { valid: false, error: 'Invalid signature' };
+      return { 
+        valid: false, 
+        error: 'Invalid signature',
+        actorDid,  // Include actorDid even when verification fails
+        keyId: components.keyId,
+        publicKey
+      };
     }
-    
-    // Get actor DID from key
-    const key = await prisma.httpSignature.findUnique({
-      where: { keyId: components.keyId },
-      select: { actorDid: true },
-    });
-    
-    const actorDid = key?.actorDid || components.keyId.split('#')[0];
     logger.info({ 
       keyId: components.keyId, 
       actorDid,
