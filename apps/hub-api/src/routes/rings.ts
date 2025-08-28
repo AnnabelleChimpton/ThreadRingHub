@@ -798,6 +798,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
    * GET /trp/rings - List and search rings
    */
   fastify.get<{ Querystring: RingQueryInput }>('/rings', {
+    preHandler: [authenticateActor],
     schema: {
       querystring: {
         type: 'object',
