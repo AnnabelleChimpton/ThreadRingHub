@@ -30,6 +30,8 @@ import {
   type MembersListResponse,
 } from '../schemas/ring-schemas';
 import { config } from '../config';
+import { generateBadge } from '../utils/badge';
+import crypto from 'crypto';
 
 /**
  * Generate a unique slug from ring name
@@ -1700,14 +1702,72 @@ export async function ringsRoutes(fastify: FastifyInstance) {
       ]);
 
       // Add owner as member
-      await prisma.membership.create({
+      const membership = await prisma.membership.create({
         data: {
           ringId: ring.id,
           actorDid,
           roleId: ownerRole.id,
           status: 'ACTIVE',
+          joinedAt: new Date(), // Set joined date for badge generation
         },
       });
+
+      // Generate badge for fork creator (owner)
+      let badge = null;
+      try {
+        const actor = await prisma.actor.findUnique({
+          where: { did: actorDid },
+          select: { name: true },
+        });
+
+        // Badge generation for fork owner
+        
+        // TODO: Use proper private key from environment
+        const RING_HUB_PRIVATE_KEY = crypto.generateKeyPairSync('ed25519', {
+          publicKeyEncoding: { type: 'spki', format: 'pem' },
+          privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+        }).privateKey;
+        
+        const RING_HUB_URL = process.env.RING_HUB_URL || 'https://ringhub.io';
+
+        badge = await generateBadge(
+          ring.slug,
+          ring.name,
+          actorDid,
+          actor?.name || 'Unknown',
+          'owner', // Role name
+          RING_HUB_PRIVATE_KEY,
+          RING_HUB_URL,
+          ring.badgeImageUrl || undefined,
+          ring.badgeImageHighResUrl || undefined
+        );
+
+        // Update membership with badge ID
+        await prisma.membership.update({
+          where: { id: membership.id },
+          data: { badgeId: badge.id },
+        });
+
+        // Store badge in database
+        await prisma.badge.create({
+          data: {
+            id: badge.id,
+            membershipId: membership.id,
+            badgeData: badge,
+            issuedAt: new Date(),
+          },
+        });
+
+        logger.info({
+          ringSlug: ring.slug,
+          badgeId: badge.id,
+          forkedBy: actorDid,
+        }, 'Fork owner badge generated');
+
+      } catch (error) {
+        logger.error({ error, ringSlug: ring.slug, actorDid }, 'Failed to generate fork owner badge');
+        // Continue without badge - don't fail the fork
+      }
 
       // Log the fork
       await prisma.auditLog.create({
