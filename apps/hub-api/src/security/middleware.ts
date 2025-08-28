@@ -27,22 +27,24 @@ export async function authenticateActor(
   try {
     logger.info({ method: request.method, url: request.url }, 'Authentication middleware called');
     
-    // Skip authentication for public endpoints
-    if (isPublicEndpoint(request.url, request.method)) {
-      logger.info({ url: request.url, method: request.method }, 'Skipping authentication for public endpoint');
-      return;
-    }
-
-    // Verify HTTP signature
+    const isPublic = isPublicEndpoint(request.url, request.method);
+    
+    // Verify HTTP signature (but don't require it for public endpoints)
     const result = await verifyHttpSignature(request);
     
     logger.info({ 
       valid: result.valid, 
       actorDid: result.actorDid, 
-      error: result.error 
+      error: result.error,
+      isPublic 
     }, 'HTTP signature verification result in middleware');
     
     if (!result.valid) {
+      // For public endpoints, authentication failure is allowed - just skip setting actor
+      if (isPublic) {
+        logger.info({ url: request.url, method: request.method, error: result.error }, 'Authentication failed for public endpoint - continuing without actor');
+        return;
+      }
       // Check if this is an admin account that should bypass signature verification
       if (result.actorDid) {
         logger.info({ actorDid: result.actorDid }, 'Signature verification failed, checking admin status');
