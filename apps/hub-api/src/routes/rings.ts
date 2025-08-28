@@ -2216,4 +2216,309 @@ export async function ringsRoutes(fastify: FastifyInstance) {
       });
     }
   });
+
+  /**
+   * PUT /trp/rings/:slug/badge - Update ring badge configuration
+   */
+  fastify.put<{ 
+    Params: { slug: string };
+    Body: {
+      badgeImageUrl?: string;
+      badgeImageHighResUrl?: string;
+      updateExistingBadges?: boolean;
+      badgeMetadata?: {
+        description?: string;
+        criteria?: string;
+      };
+    };
+  }>('/rings/:slug/badge', {
+    preHandler: [
+      authenticateActor,
+      requireVerifiedActor,
+      requireNotBlocked(),
+      requireMembership(),
+      requirePermission('manage_ring'),
+    ],
+    schema: {
+      params: {
+        type: 'object',
+        properties: {
+          slug: { type: 'string' },
+        },
+        required: ['slug'],
+      },
+      body: {
+        type: 'object',
+        properties: {
+          badgeImageUrl: { 
+            type: 'string', 
+            format: 'uri',
+            description: 'URL for standard badge image (88x31px recommended)'
+          },
+          badgeImageHighResUrl: { 
+            type: 'string', 
+            format: 'uri',
+            description: 'URL for high-resolution badge image (352x124px recommended)'
+          },
+          updateExistingBadges: { 
+            type: 'boolean', 
+            default: false,
+            description: 'Whether to regenerate existing badges with new images'
+          },
+          badgeMetadata: {
+            type: 'object',
+            properties: {
+              description: { type: 'string', maxLength: 500 },
+              criteria: { type: 'string', maxLength: 500 }
+            },
+            description: 'Additional metadata for badge criteria and description'
+          }
+        },
+        additionalProperties: false
+      },
+      tags: ['rings'],
+      summary: 'Update ring badge configuration',
+      description: 'Update badge images and optionally regenerate existing badges for all ring members',
+      security: [{ httpSignature: [] }],
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            ring: {
+              type: 'object',
+              properties: {
+                slug: { type: 'string' },
+                name: { type: 'string' },
+                badgeImageUrl: { type: 'string', nullable: true },
+                badgeImageHighResUrl: { type: 'string', nullable: true },
+                updatedAt: { type: 'string', format: 'date-time' }
+              }
+            },
+            badgesUpdated: {
+              type: 'object',
+              properties: {
+                total: { type: 'number' },
+                updated: { type: 'number' },
+                failed: { type: 'number' }
+              },
+              nullable: true
+            },
+            message: { type: 'string' }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { slug } = request.params;
+      const { 
+        badgeImageUrl, 
+        badgeImageHighResUrl, 
+        updateExistingBadges = false,
+        badgeMetadata 
+      } = request.body;
+      const actorDid = request.actor!.did;
+
+      // Find the ring
+      const ring = await prisma.ring.findUnique({
+        where: { slug },
+        select: { 
+          id: true, 
+          slug: true, 
+          name: true, 
+          ownerDid: true,
+          badgeImageUrl: true,
+          badgeImageHighResUrl: true
+        }
+      });
+
+      if (!ring) {
+        reply.code(404).send({
+          error: 'Not found',
+          message: 'Ring not found',
+        });
+        return;
+      }
+
+      // Check if actor is ring owner (additional check beyond middleware)
+      if (ring.ownerDid !== actorDid) {
+        reply.code(403).send({
+          error: 'Forbidden',
+          message: 'Only ring owners can update badge configuration',
+        });
+        return;
+      }
+
+      // Validate at least one update field is provided
+      if (!badgeImageUrl && !badgeImageHighResUrl && !badgeMetadata) {
+        reply.code(400).send({
+          error: 'Bad request',
+          message: 'At least one update field must be provided',
+        });
+        return;
+      }
+
+      // Update ring badge configuration
+      const updatedRing = await prisma.ring.update({
+        where: { slug },
+        data: {
+          ...(badgeImageUrl !== undefined && { badgeImageUrl }),
+          ...(badgeImageHighResUrl !== undefined && { badgeImageHighResUrl }),
+          updatedAt: new Date(),
+        },
+      });
+
+      let badgesUpdated = null;
+
+      // Regenerate existing badges if requested
+      if (updateExistingBadges) {
+        try {
+          // Get all active memberships for this ring
+          const memberships = await prisma.membership.findMany({
+            where: {
+              ringId: ring.id,
+              status: 'ACTIVE',
+              badgeId: { not: null } // Only update existing badges
+            },
+            include: {
+              role: { select: { name: true } }
+            }
+          });
+
+          let updated = 0;
+          let failed = 0;
+
+          logger.info({
+            ringSlug: slug,
+            membershipCount: memberships.length,
+            actorDid,
+          }, 'Starting badge regeneration for ring');
+
+          for (const membership of memberships) {
+            try {
+              // Get actor info
+              const actor = await prisma.actor.findUnique({
+                where: { did: membership.actorDid },
+                select: { name: true }
+              });
+
+              // Generate new badge with updated images
+              const newBadge = await generateBadge(
+                ring.slug,
+                ring.name,
+                membership.actorDid,
+                actor?.name || 'Unknown',
+                membership.role?.name || 'member',
+                crypto.generateKeyPairSync('ed25519', {
+                  publicKeyEncoding: { type: 'spki', format: 'pem' },
+                  privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+                }).privateKey, // TODO: Use proper key from environment
+                process.env.RING_HUB_URL || 'https://ringhub.io',
+                updatedRing.badgeImageUrl || undefined,
+                updatedRing.badgeImageHighResUrl || undefined
+              );
+
+              // Update badge in database
+              await prisma.badge.update({
+                where: { id: membership.badgeId! },
+                data: {
+                  badgeData: {
+                    ...newBadge,
+                    ...(badgeMetadata && {
+                      credentialSubject: {
+                        ...newBadge.credentialSubject,
+                        achievement: {
+                          ...newBadge.credentialSubject.achievement,
+                          ...(badgeMetadata.description && { 
+                            description: badgeMetadata.description 
+                          }),
+                          ...(badgeMetadata.criteria && {
+                            criteria: { narrative: badgeMetadata.criteria }
+                          })
+                        }
+                      }
+                    })
+                  },
+                  issuedAt: new Date() // Update issued date
+                }
+              });
+
+              updated++;
+
+            } catch (error) {
+              logger.error({ 
+                error, 
+                membershipId: membership.id,
+                badgeId: membership.badgeId,
+                ringSlug: slug 
+              }, 'Failed to regenerate badge');
+              failed++;
+            }
+          }
+
+          badgesUpdated = {
+            total: memberships.length,
+            updated,
+            failed
+          };
+
+          logger.info({
+            ringSlug: slug,
+            badgesUpdated,
+            actorDid,
+          }, 'Badge regeneration completed');
+
+        } catch (error) {
+          logger.error({ error, ringSlug: slug }, 'Failed to regenerate badges');
+          // Continue with response - don't fail the ring update
+        }
+      }
+
+      // Log the action
+      await prisma.auditLog.create({
+        data: {
+          ringId: ring.id,
+          action: 'ring.badge_updated',
+          actorDid,
+          metadata: {
+            badgeImageUrl: updatedRing.badgeImageUrl,
+            badgeImageHighResUrl: updatedRing.badgeImageHighResUrl,
+            updateExistingBadges,
+            badgesUpdated,
+            badgeMetadata
+          },
+        },
+      });
+
+      logger.info({
+        ringSlug: slug,
+        actorDid,
+        updateExistingBadges,
+        badgesUpdated,
+      }, 'Ring badge configuration updated');
+
+      const responseMessage = updateExistingBadges 
+        ? `Ring badge configuration updated and ${badgesUpdated?.updated || 0} existing badges regenerated`
+        : 'Ring badge configuration updated. New badges will use updated images.';
+
+      reply.send({
+        ring: {
+          slug: updatedRing.slug,
+          name: updatedRing.name,
+          badgeImageUrl: updatedRing.badgeImageUrl,
+          badgeImageHighResUrl: updatedRing.badgeImageHighResUrl,
+          updatedAt: updatedRing.updatedAt.toISOString(),
+        },
+        ...(badgesUpdated && { badgesUpdated }),
+        message: responseMessage,
+      });
+
+    } catch (error) {
+      logger.error({ error }, 'Failed to update ring badge configuration');
+      reply.code(500).send({
+        error: 'Internal error',
+        message: 'Failed to update ring badge configuration',
+      });
+    }
+  });
 }
