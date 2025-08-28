@@ -9,7 +9,7 @@ const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 
-const POST_ID = 'e53a6ebe-26c7-482d-af42-731c5c6a4006';
+const POST_ID = '0f952c8a-605c-4544-9abb-5280123235c2';
 const AUTHOR_DID = 'did:web:homepageagain.com:users:1af194c245189394';
 
 async function removeSpecificPost() {
