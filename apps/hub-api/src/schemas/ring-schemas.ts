@@ -33,6 +33,7 @@ export const UpdateRingSchema = z.object({
   visibility: RingVisibilitySchema.optional(),
   joinPolicy: JoinPolicySchema.optional(),
   postPolicy: PostPolicySchema.optional(),
+  parentSlug: z.string().optional(), // For updating parent threadring
   curatorNote: z.string().max(1000).optional(),
   badgeImageUrl: z.string().url().optional(), // 88x31 badge image URL
   badgeImageHighResUrl: z.string().url().optional(), // 352x124 high-res badge image URL
@@ -210,6 +211,8 @@ export const RingResponseSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   curatorNote: z.string().nullable(),
+  badgeImageUrl: z.string().nullable(),
+  badgeImageHighResUrl: z.string().nullable(),
   metadata: z.record(z.any()).nullable(),
   policies: z.record(z.any()).nullable(),
   // Computed fields
@@ -226,6 +229,13 @@ export const RingResponseSchema = z.object({
     name: z.string(),
     memberCount: z.number(),
   })).optional(),
+  // Current user's membership info (only included if authenticated)
+  currentUserMembership: z.object({
+    status: z.enum(['PENDING', 'ACTIVE', 'SUSPENDED', 'REVOKED']),
+    role: z.string().nullable(),
+    joinedAt: z.string().nullable(),
+    badgeId: z.string().nullable(),
+  }).optional(),
 });
 
 // Ring list response schema

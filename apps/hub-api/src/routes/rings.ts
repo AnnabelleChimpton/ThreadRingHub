@@ -69,7 +69,8 @@ function generateSlug(name: string, existingSlugs: string[] = []): string {
 async function buildRingResponse(
   ring: any,
   includeLineage = false,
-  includeChildren = false
+  includeChildren = false,
+  actorDid?: string
 ): Promise<RingResponse> {
   const response: RingResponse = {
     id: ring.id,
@@ -158,6 +159,28 @@ async function buildRingResponse(
         };
       })
     );
+  }
+
+  // Add current user's membership info if actor is provided
+  if (actorDid) {
+    const membership = await prisma.membership.findFirst({
+      where: {
+        ringId: ring.id,
+        actorDid: actorDid,
+      },
+      include: {
+        role: { select: { name: true } },
+      },
+    });
+
+    if (membership) {
+      response.currentUserMembership = {
+        status: membership.status,
+        role: membership.role?.name || null,
+        joinedAt: membership.joinedAt?.toISOString() || null,
+        badgeId: membership.badgeId,
+      };
+    }
   }
 
   return response;
@@ -266,7 +289,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         return;
       }
 
-      const response = await buildRingResponse(ring, true, true);
+      const response = await buildRingResponse(ring, true, true, request.actor?.did);
       reply.send(response);
     } catch (error) {
       logger.error({ error }, 'Failed to get root ring');
@@ -789,6 +812,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
       },
       tags: ['rings'],
       summary: 'List and search rings',
+      description: 'Lists rings with optional search and filtering. If authenticated, includes current user membership status and role for each ring.',
       response: {
         200: {
           type: 'object',
@@ -852,7 +876,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
       ]);
 
       const ringResponses = await Promise.all(
-        rings.map(ring => buildRingResponse(ring))
+        rings.map(ring => buildRingResponse(ring, false, false, request.actor?.did))
       );
 
       const response: RingListResponse = {
@@ -922,7 +946,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
       });
 
       const ringResponses = await Promise.all(
-        rings.map(ring => buildRingResponse(ring))
+        rings.map(ring => buildRingResponse(ring, false, false, request.actor?.did))
       );
 
       reply.send({
@@ -998,7 +1022,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         }
       }
 
-      const response = await buildRingResponse(ring, true, true);
+      const response = await buildRingResponse(ring, true, true, request.actor?.did);
       reply.send(response);
     } catch (error) {
       logger.error({ error }, 'Failed to get ring details');
@@ -1263,7 +1287,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         parentSlug: data.parentSlug,
       }, 'Ring created');
 
-      const response = await buildRingResponse(ring, true, false);
+      const response = await buildRingResponse(ring, true, false, actorDid);
       reply.code(201).send(response);
     } catch (error) {
       logger.error({ error }, 'Failed to create ring');
@@ -1302,6 +1326,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
           visibility: { type: 'string', enum: ['PUBLIC', 'UNLISTED', 'PRIVATE'] },
           joinPolicy: { type: 'string', enum: ['OPEN', 'APPLICATION', 'INVITATION', 'CLOSED'] },
           postPolicy: { type: 'string', enum: ['OPEN', 'MEMBERS', 'CURATED', 'CLOSED'] },
+          parentSlug: { type: 'string' },
           curatorNote: { type: 'string', maxLength: 1000 },
           badgeImageUrl: { type: 'string', format: 'uri' },
           badgeImageHighResUrl: { type: 'string', format: 'uri' },
@@ -1331,6 +1356,88 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         return;
       }
 
+      // Check if attempting to update parent relationship
+      if (data.parentSlug !== undefined) {
+        // Prevent moving the root ring itself
+        if (ring.slug === config.rings.rootSlug) {
+          reply.code(400).send({
+            error: 'Invalid operation',
+            message: 'The root ring cannot have its parent changed',
+          });
+          return;
+        }
+
+        // For parent updates, require either ring owner or admin override
+        const isOwner = ring.ownerDid === actorDid;
+        const isAdmin = await prisma.actor.findUnique({
+          where: { did: actorDid },
+          select: { isAdmin: true }
+        });
+
+        if (!isOwner && !isAdmin?.isAdmin) {
+          reply.code(403).send({
+            error: 'Insufficient permissions',
+            message: 'Only ring owners or administrators can change parent relationships',
+          });
+          return;
+        }
+      }
+
+      // Validate parent ring if parentSlug is provided
+      let newParentId = ring.parentId; // Keep current parent if not specified
+      if (data.parentSlug !== undefined) {
+        let targetParentSlug = data.parentSlug;
+        
+        // If null or empty string, default to root ring
+        if (data.parentSlug === null || data.parentSlug === '') {
+          targetParentSlug = config.rings.rootSlug;
+        }
+
+        // Don't allow setting parent to itself
+        if (targetParentSlug === slug) {
+          reply.code(400).send({
+            error: 'Invalid parent',
+            message: 'Ring cannot be its own parent',
+          });
+          return;
+        }
+
+        // Find the new parent ring
+        const parentRing = await prisma.ring.findUnique({
+          where: { slug: targetParentSlug },
+        });
+
+        if (!parentRing) {
+          reply.code(400).send({
+            error: 'Invalid parent',
+            message: `Parent ring '${targetParentSlug}' not found`,
+          });
+          return;
+        }
+
+        // Prevent circular references by checking if the parent ring is a descendant of current ring
+        let checkRing = parentRing;
+        const visited = new Set([ring.id]);
+        while (checkRing.parentId) {
+          if (visited.has(checkRing.parentId)) {
+            reply.code(400).send({
+              error: 'Invalid parent',
+              message: 'Cannot create circular parent-child relationship',
+            });
+            return;
+          }
+          visited.add(checkRing.parentId);
+          
+          const nextParent = await prisma.ring.findUnique({
+            where: { id: checkRing.parentId },
+          });
+          if (!nextParent) break;
+          checkRing = nextParent;
+        }
+
+        newParentId = parentRing.id;
+      }
+
       // Update the ring
       const updatedRing = await prisma.ring.update({
         where: { slug },
@@ -1341,6 +1448,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
           visibility: data.visibility,
           joinPolicy: data.joinPolicy,
           postPolicy: data.postPolicy,
+          parentId: newParentId,
           curatorNote: data.curatorNote,
           badgeImageUrl: data.badgeImageUrl,
           badgeImageHighResUrl: data.badgeImageHighResUrl,
@@ -1351,13 +1459,18 @@ export async function ringsRoutes(fastify: FastifyInstance) {
       });
 
       // Log the action
+      const auditAction = data.parentSlug !== undefined ? 'ring.parent_updated' : 'ring.updated';
       await prisma.auditLog.create({
         data: {
           ringId: ring.id,
-          action: 'ring.updated',
+          action: auditAction,
           actorDid,
           metadata: {
             changes: data,
+            previousParentId: ring.parentId,
+            newParentId: newParentId,
+            parentSlugChanged: data.parentSlug !== undefined,
+            movedToRoot: data.parentSlug !== undefined && (data.parentSlug === null || data.parentSlug === ''),
           },
         },
       });
@@ -1367,7 +1480,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         updatedBy: actorDid,
       }, 'Ring updated');
 
-      const response = await buildRingResponse(updatedRing, true, true);
+      const response = await buildRingResponse(updatedRing, true, true, actorDid);
       reply.send(response);
     } catch (error) {
       logger.error({ error }, 'Failed to update ring');
@@ -1617,7 +1730,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
       // Record rate limit usage
       await recordRateLimitUsage(request, 'fork_ring', { ringId: ring.id });
 
-      const response = await buildRingResponse(ring, true, false);
+      const response = await buildRingResponse(ring, true, false, actorDid);
       reply.code(201).send(response);
     } catch (error) {
       logger.error({ error }, 'Failed to fork ring');
@@ -1718,7 +1831,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         
         // Only include if user can see this ring
         if (await canSeeRing(parent)) {
-          ancestors.unshift(await buildRingResponse(parent));
+          ancestors.unshift(await buildRingResponse(parent, false, false, request.actor?.did));
         }
         currentRing = parent;
       }
@@ -1734,7 +1847,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
           if (await canSeeRing(child)) {
             const childDescendants = await getDescendants(child.id);
             visibleChildren.push({
-              ...await buildRingResponse(child),
+              ...await buildRingResponse(child, false, false, request.actor?.did),
               children: childDescendants,
             });
           }
@@ -1746,7 +1859,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
       const descendants = await getDescendants(ring.id);
 
       reply.send({
-        ring: await buildRingResponse(ring),
+        ring: await buildRingResponse(ring, false, false, request.actor?.did),
         ancestors,
         descendants,
         generatedAt: new Date().toISOString(),
