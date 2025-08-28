@@ -530,6 +530,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
 
   /**
    * POST /trp/curate - Moderate/curate content
+   * Allows both moderators and post authors to manage content
    */
   fastify.post<{ 
     Body: CuratePostInput & { postId: string } 
@@ -538,8 +539,6 @@ export async function contentRoutes(fastify: FastifyInstance) {
       authenticateActor,
       requireVerifiedActor,
       requireNotBlocked(),
-      requireMembership(),
-      requirePermission('moderate_posts'),
     ],
     schema: {
       body: {
@@ -553,19 +552,19 @@ export async function contentRoutes(fastify: FastifyInstance) {
         required: ['postId', 'action'],
       },
       tags: ['content'],
-      summary: 'Moderate/curate content',
+      summary: 'Moderate/curate content (moderators can do all actions, authors can remove their own posts)',
       security: [{ httpSignature: [] }],
     },
   }, async (request, reply) => {
     try {
       const { postId, action, reason, metadata } = request.body;
-      const moderatorDid = request.actor!.did;
+      const actorDid = request.actor!.did;
 
       // Find the post
       const postRef = await prisma.postRef.findUnique({
         where: { id: postId },
         include: {
-          ring: { select: { slug: true } },
+          ring: { select: { slug: true, id: true } },
         },
       });
 
@@ -577,10 +576,142 @@ export async function contentRoutes(fastify: FastifyInstance) {
         return;
       }
 
-      // Process the moderation action
+      // Check permissions
+      const isAuthor = postRef.actorDid === actorDid || postRef.submittedBy === actorDid;
+      
+      // Authors can only remove their own posts
+      if (isAuthor && action === 'remove') {
+        // Author is allowed to remove their own content
+        logger.info({
+          postId,
+          actorDid,
+          action: 'author_remove',
+        }, 'Author removing their own post');
+      } else if (!isAuthor) {
+        // Not the author, check if they have moderation permissions
+        const membership = await prisma.membership.findFirst({
+          where: {
+            ringId: postRef.ring.id,
+            actorDid: actorDid,
+            status: 'ACTIVE',
+          },
+          include: {
+            role: {
+              select: { permissions: true },
+            },
+          },
+        });
+
+        if (!membership) {
+          reply.code(403).send({
+            error: 'Forbidden',
+            message: 'You must be a member of this ring to moderate content',
+          });
+          return;
+        }
+
+        // Check if member has moderate_posts permission
+        const permissions = (membership.role?.permissions as string[]) || [];
+        if (!permissions.includes('moderate_posts')) {
+          reply.code(403).send({
+            error: 'Forbidden',
+            message: 'You do not have permission to moderate content in this ring',
+          });
+          return;
+        }
+      } else {
+        // Author trying to do something other than remove
+        reply.code(403).send({
+          error: 'Forbidden',
+          message: 'Authors can only remove their own posts. Other actions require moderation permissions.',
+        });
+        return;
+      }
+
+      // Handle author removal differently - removes from ALL rings
+      if (isAuthor && action === 'remove') {
+        // Find all instances of this content across all rings
+        const allPostRefs = await prisma.postRef.findMany({
+          where: {
+            uri: postRef.uri,
+            actorDid: postRef.actorDid,
+          },
+          include: {
+            ring: { select: { slug: true, id: true } },
+          },
+        });
+
+        // Update all instances
+        const updatedPosts = await prisma.postRef.updateMany({
+          where: {
+            uri: postRef.uri,
+            actorDid: postRef.actorDid,
+          },
+          data: {
+            status: 'REMOVED',
+            moderatedAt: new Date(),
+            moderatedBy: actorDid,
+            moderationNote: reason || 'Removed by author from all rings',
+          },
+        });
+
+        // Log the action for each ring
+        const auditLogs = allPostRefs.map(ref => ({
+          ringId: ref.ringId,
+          action: 'content.author_removed_globally',
+          actorDid: actorDid,
+          targetDid: null,
+          metadata: {
+            postId: ref.id,
+            uri: ref.uri,
+            reason: reason || 'Removed by author from all rings',
+            isAuthorAction: true,
+            affectedRings: allPostRefs.map(r => r.ring.slug),
+            totalRemoved: allPostRefs.length,
+          },
+        }));
+
+        await prisma.auditLog.createMany({
+          data: auditLogs,
+        });
+
+        logger.info({
+          postId,
+          uri: postRef.uri,
+          actorDid,
+          affectedRings: allPostRefs.map(r => r.ring.slug),
+          totalRemoved: allPostRefs.length,
+        }, 'Author removed content from all rings');
+
+        // Return the updated post info
+        const updatedPost = await prisma.postRef.findUnique({
+          where: { id: postId },
+          include: {
+            ring: { select: { slug: true } },
+          },
+        });
+
+        reply.send({
+          post: buildPostResponse(updatedPost!),
+          action: 'remove',
+          moderator: 'author',
+          moderatedAt: new Date().toISOString(),
+          reason: reason || 'Removed by author from all rings',
+          isAuthorAction: true,
+          globalRemoval: true,
+          affectedRings: allPostRefs.map(r => ({ 
+            id: r.ring.id, 
+            slug: r.ring.slug 
+          })),
+          totalRemoved: allPostRefs.length,
+        });
+        return;
+      }
+
+      // Process moderator actions (only affects single ring)
       let updateData: any = {
         moderatedAt: new Date(),
-        moderatedBy: moderatorDid,
+        moderatedBy: actorDid,
         moderationNote: reason,
       };
 
@@ -608,7 +739,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
           return;
       }
 
-      // Update the post
+      // Update only the specific post in this ring
       const updatedPost = await prisma.postRef.update({
         where: { id: postId },
         data: updateData,
@@ -622,12 +753,14 @@ export async function contentRoutes(fastify: FastifyInstance) {
         data: {
           ringId: postRef.ringId,
           action: `content.${action}`,
-          actorDid: moderatorDid,
-          targetDid: postRef.actorDid,
+          actorDid: actorDid,
+          targetDid: postRef.actorDid !== actorDid ? postRef.actorDid : null,
           metadata: {
             postId,
             uri: postRef.uri,
             reason,
+            isModeratorAction: true,
+            ringSpecific: true,
             ...metadata,
           },
         },
@@ -636,17 +769,19 @@ export async function contentRoutes(fastify: FastifyInstance) {
       logger.info({
         postId,
         action,
-        moderatorDid,
+        actorDid,
         ringSlug: postRef.ring.slug,
         reason,
-      }, 'Content moderated');
+      }, 'Content moderated in specific ring');
 
       reply.send({
         post: buildPostResponse(updatedPost),
         action,
-        moderator: moderatorDid,
+        moderator: actorDid,
         moderatedAt: updateData.moderatedAt.toISOString(),
         reason,
+        isAuthorAction: false,
+        ringSpecific: true,
       });
     } catch (error) {
       logger.error({ error }, 'Failed to moderate content');
