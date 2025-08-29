@@ -301,19 +301,19 @@ export class RateLimitingService {
     }
 
     // Count non-notification posts
-    const realPostCount = await prisma.postRef.count({
-      where: {
-        ringId: recentRing.id,
-        status: 'ACCEPTED',
-        NOT: {
-          // Only exclude posts that explicitly have type: 'fork_notification'
-          metadata: {
-            path: ['type'],
-            equals: 'fork_notification'
-          }
-        }
-      }
-    });
+    // Use raw query due to Prisma NULL handling issues with JSON path queries
+    const realPostCountResult = await prisma.$queryRaw<[{count: bigint}]>`
+      SELECT COUNT(*) as count
+      FROM "PostRef" 
+      WHERE "ringId" = ${recentRing.id}
+        AND status = 'ACCEPTED' 
+        AND (
+          metadata IS NULL 
+          OR metadata->>'type' IS NULL 
+          OR metadata->>'type' != 'fork_notification'
+        )
+    `;
+    const realPostCount = Number(realPostCountResult[0].count);
 
     // If the most recent ring has real posts, allow fork
     if (realPostCount > 0) {
