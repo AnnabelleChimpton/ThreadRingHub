@@ -305,24 +305,13 @@ export class RateLimitingService {
       where: {
         ringId: recentRing.id,
         status: 'ACCEPTED',
-        OR: [
-          // Posts without metadata
-          { metadata: { equals: Prisma.JsonNull } },
-          // Posts with metadata but no type field
-          { 
-            metadata: {
-              path: ['type'],
-              equals: Prisma.JsonNull
-            }
-          },
-          // Posts with type that is not fork_notification
-          {
-            metadata: {
-              path: ['type'],
-              not: 'fork_notification'
-            }
+        NOT: {
+          // Only exclude posts that explicitly have type: 'fork_notification'
+          metadata: {
+            path: ['type'],
+            equals: 'fork_notification'
           }
-        ]
+        }
       }
     });
 
