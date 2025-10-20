@@ -269,7 +269,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
           since: { type: 'string' },
           until: { type: 'string' },
           pinned: { type: 'boolean' },
-          scope: { type: 'string', enum: ['ring', 'children', 'family'], default: 'ring' },
+          scope: { type: 'string', enum: ['ring', 'parent', 'children', 'siblings', 'family'], default: 'ring' },
         },
       },
       tags: ['content'],
