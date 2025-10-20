@@ -1897,6 +1897,21 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         currentRing = parent;
       }
 
+      // Helper function to count total descendants (recursive)
+      async function countDescendants(ringId: string): Promise<number> {
+        const children = await prisma.ring.findMany({
+          where: { parentId: ringId },
+          select: { id: true },
+        });
+
+        let count = children.length;
+        for (const child of children) {
+          count += await countDescendants(child.id);
+        }
+
+        return count;
+      }
+
       // Get all descendants (filtered by visibility)
       async function getDescendants(ringId: string): Promise<any[]> {
         const children = await prisma.ring.findMany({
@@ -1907,8 +1922,11 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         for (const child of children) {
           if (await canSeeRing(child)) {
             const childDescendants = await getDescendants(child.id);
+            const descendantCount = await countDescendants(child.id);
+
             visibleChildren.push({
               ...await buildRingResponse(child, false, false, request.actor?.did),
+              descendantCount,
               children: childDescendants,
             });
           }
