@@ -138,7 +138,7 @@ export const PostQuerySchema = z.object({
   since: z.string().optional(), // ISO date string
   until: z.string().optional(), // ISO date string
   pinned: z.coerce.boolean().optional(),
-  scope: z.enum(['ring', 'children', 'family']).default('ring'),
+  scope: z.enum(['ring', 'parent', 'children', 'siblings', 'family']).default('ring'),
 });
 
 // Audit query schema

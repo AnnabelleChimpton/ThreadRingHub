@@ -323,35 +323,62 @@ export async function contentRoutes(fastify: FastifyInstance) {
 
       // Build ring IDs based on scope
       let ringIds: string[] = [ring.id];
-      
-      if (scope === 'children') {
+
+      if (scope === 'parent') {
+        // Get only the parent ring
+        if (ring.parentId) {
+          ringIds = [ring.parentId];
+        } else {
+          ringIds = []; // Root ring has no parent
+        }
+      } else if (scope === 'children') {
         // Get all direct children
         const children = await prisma.ring.findMany({
           where: { parentId: ring.id },
           select: { id: true },
         });
         ringIds = children.map(child => child.id);
-      } else if (scope === 'family') {
-        // Get all descendants (children and their children recursively)
-        const getAllDescendants = async (parentId: string): Promise<string[]> => {
-          const children = await prisma.ring.findMany({
-            where: { parentId },
+      } else if (scope === 'siblings') {
+        // Get all rings with same parent, excluding current ring
+        if (ring.parentId) {
+          const siblings = await prisma.ring.findMany({
+            where: {
+              parentId: ring.parentId,
+              id: { not: ring.id }
+            },
             select: { id: true },
           });
-          
-          let allIds = children.map(child => child.id);
-          
-          // Recursively get descendants
-          for (const child of children) {
-            const descendants = await getAllDescendants(child.id);
-            allIds = allIds.concat(descendants);
-          }
-          
-          return allIds;
-        };
-        
-        const descendants = await getAllDescendants(ring.id);
-        ringIds = [ring.id, ...descendants]; // Include current ring + all descendants
+          ringIds = siblings.map(sibling => sibling.id);
+        } else {
+          ringIds = []; // Root ring has no siblings
+        }
+      } else if (scope === 'family') {
+        // Get parent + siblings + current + direct children
+        const familyIds = [ring.id]; // Current ring
+
+        // Add parent
+        if (ring.parentId) {
+          familyIds.push(ring.parentId);
+
+          // Add siblings (same parent, excluding self)
+          const siblings = await prisma.ring.findMany({
+            where: {
+              parentId: ring.parentId,
+              id: { not: ring.id }
+            },
+            select: { id: true },
+          });
+          familyIds.push(...siblings.map(s => s.id));
+        }
+
+        // Add direct children
+        const children = await prisma.ring.findMany({
+          where: { parentId: ring.id },
+          select: { id: true },
+        });
+        familyIds.push(...children.map(c => c.id));
+
+        ringIds = familyIds;
       }
       
       // Build query filters
