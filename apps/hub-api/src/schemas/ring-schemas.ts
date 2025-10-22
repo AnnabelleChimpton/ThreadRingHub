@@ -254,6 +254,11 @@ export const MemberResponseSchema = z.object({
   avatarUrl: z.string().nullable(),           // From DID document (Tier 2 - optional)
   profileUrl: z.string().nullable(),          // From DID service endpoint (Tier 1 - always present for federated users)
   instanceDomain: z.string().nullable(),      // Parsed from DID for federation UX
+  handles: z.array(z.object({                 // Handles array for federation UX (e.g., [{handle: "annabelle", domain: "homepageagain.com", url: "https://..."}])
+    handle: z.string(),
+    domain: z.string(),
+    url: z.string(),
+  })),
   status: z.enum(['PENDING', 'ACTIVE', 'SUSPENDED', 'REVOKED']),
   role: z.string().nullable(),
   joinedAt: z.string(),

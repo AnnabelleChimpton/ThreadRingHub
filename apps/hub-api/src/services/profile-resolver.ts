@@ -10,6 +10,7 @@ export interface ActorProfile {
   actorName: string | null;      // From didDoc.name (Tier 2 - conditional on privacy)
   avatarUrl: string | null;       // From didDoc.image (Tier 2 - conditional on privacy)
   profileUrl: string;             // From didDoc.service[type=Profile] (Tier 1 - REQUIRED)
+  handle: string | null;          // Extracted from profile URL (e.g., "annabelle" from /resident/annabelle)
   instanceDomain: string | null;  // Parsed from DID for federation UX
 }
 
@@ -34,6 +35,29 @@ function extractDomainFromDID(did: string): string | null {
     return domain;
   } catch (error) {
     logger.error({ error, did }, 'Failed to extract domain from DID');
+    return null;
+  }
+}
+
+/**
+ * Extract handle from profile URL
+ * Example: https://homepageagain.com/resident/annabelle -> "annabelle"
+ */
+function extractHandleFromProfileUrl(profileUrl: string): string | null {
+  try {
+    const url = new URL(profileUrl);
+    const pathParts = url.pathname.split('/').filter(Boolean);
+
+    // Profile URLs are typically: /resident/{handle} or /u/{handle} or /@{handle}
+    if (pathParts.length >= 2) {
+      const handle = pathParts[pathParts.length - 1];
+      // Remove @ prefix if present
+      return handle.startsWith('@') ? handle.substring(1) : handle;
+    }
+
+    return null;
+  } catch (error) {
+    logger.warn({ error, profileUrl }, 'Failed to extract handle from profile URL');
     return null;
   }
 }
@@ -88,6 +112,9 @@ export function extractProfileFromDID(didDoc: DIDDocument): ActorProfile | null 
     // Extract domain from DID
     const instanceDomain = extractDomainFromDID(actorDid);
 
+    // Extract handle from profile URL
+    const handle = extractHandleFromProfileUrl(profileUrl);
+
     // Extract optional profile data (Tier 2 - conditional on privacy settings)
     const actorName = didDoc.name || null;
     const avatarUrl = didDoc.image || null;
@@ -97,6 +124,7 @@ export function extractProfileFromDID(didDoc: DIDDocument): ActorProfile | null 
       actorName,
       avatarUrl,
       profileUrl,
+      handle,
       instanceDomain,
     };
 
@@ -106,6 +134,7 @@ export function extractProfileFromDID(didDoc: DIDDocument): ActorProfile | null 
         hasName: !!actorName,
         hasAvatar: !!avatarUrl,
         profileUrl,
+        handle,
         instanceDomain,
       },
       'Extracted profile from DID document'

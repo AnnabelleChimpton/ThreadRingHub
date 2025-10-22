@@ -122,6 +122,7 @@ model Membership {
   actorName           String?   // Display name from DID doc (Tier 2 - conditional on privacy)
   avatarUrl           String?   // Avatar URL from DID doc (Tier 2 - conditional on privacy)
   profileUrl          String?   // Profile page URL from DID service endpoint (Tier 1 - always present)
+  handle              String?   // Handle extracted from profile URL (e.g., "annabelle" from /resident/annabelle)
   instanceDomain      String?   // Parsed domain from DID for federation UX
   profileLastFetched  DateTime? // Timestamp of last DID resolution
   profileSource       String?   // Source of profile data: 'DID_RESOLUTION' | 'API_REQUEST' | 'MANUAL'

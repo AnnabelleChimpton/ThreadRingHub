@@ -196,6 +196,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
         actorName: actorProfile.actorName,
         avatarUrl: actorProfile.avatarUrl,
         profileUrl: actorProfile.profileUrl,
+        handle: actorProfile.handle,
         instanceDomain: actorProfile.instanceDomain,
         profileLastFetched: new Date(),
         profileSource: 'DID_RESOLUTION',

@@ -2034,18 +2034,31 @@ export async function ringsRoutes(fastify: FastifyInstance) {
 
       const actorNameMap = new Map(actors.map(a => [a.did, a.name]));
 
-      const members = memberships.map(m => ({
-        actorDid: m.actorDid,
-        // Prefer profile data from membership (from DID resolution), fallback to Actor table
-        actorName: m.actorName || actorNameMap.get(m.actorDid) || null,
-        avatarUrl: m.avatarUrl || null,
-        profileUrl: m.profileUrl || null,
-        instanceDomain: m.instanceDomain || null,
-        status: m.status,
-        role: m.role?.name || null,
-        joinedAt: m.joinedAt?.toISOString() || null,
-        badgeId: m.badgeId,
-      }));
+      const members = memberships.map(m => {
+        // Build handles array from profile data
+        const handles = [];
+        if (m.handle && m.instanceDomain && m.profileUrl) {
+          handles.push({
+            handle: m.handle,
+            domain: m.instanceDomain,
+            url: m.profileUrl,
+          });
+        }
+
+        return {
+          actorDid: m.actorDid,
+          // Prefer profile data from membership (from DID resolution), fallback to Actor table
+          actorName: m.actorName || actorNameMap.get(m.actorDid) || null,
+          avatarUrl: m.avatarUrl || null,
+          profileUrl: m.profileUrl || null,
+          instanceDomain: m.instanceDomain || null,
+          handles,
+          status: m.status,
+          role: m.role?.name || null,
+          joinedAt: m.joinedAt?.toISOString() || null,
+          badgeId: m.badgeId,
+        };
+      });
 
       const response: MembersListResponse = {
         members,
