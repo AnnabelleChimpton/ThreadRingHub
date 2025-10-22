@@ -1,5 +1,3 @@
--- CreateEnum
-CREATE TYPE "InvitationStatus" AS ENUM ('PENDING', 'ACCEPTED', 'DECLINED', 'EXPIRED', 'REVOKED');
 
 -- AlterTable
 ALTER TABLE "Membership" ADD COLUMN     "actorName" TEXT,
