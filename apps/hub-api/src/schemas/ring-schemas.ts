@@ -251,6 +251,9 @@ export const RingListResponseSchema = z.object({
 export const MemberResponseSchema = z.object({
   actorDid: z.string(),
   actorName: z.string().nullable(),
+  avatarUrl: z.string().nullable(),           // From DID document (Tier 2 - optional)
+  profileUrl: z.string().nullable(),          // From DID service endpoint (Tier 1 - always present for federated users)
+  instanceDomain: z.string().nullable(),      // Parsed from DID for federation UX
   status: z.enum(['PENDING', 'ACTIVE', 'SUSPENDED', 'REVOKED']),
   role: z.string().nullable(),
   joinedAt: z.string(),

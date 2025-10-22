@@ -2036,7 +2036,11 @@ export async function ringsRoutes(fastify: FastifyInstance) {
 
       const members = memberships.map(m => ({
         actorDid: m.actorDid,
-        actorName: actorNameMap.get(m.actorDid) || null,
+        // Prefer profile data from membership (from DID resolution), fallback to Actor table
+        actorName: m.actorName || actorNameMap.get(m.actorDid) || null,
+        avatarUrl: m.avatarUrl || null,
+        profileUrl: m.profileUrl || null,
+        instanceDomain: m.instanceDomain || null,
         status: m.status,
         role: m.role?.name || null,
         joinedAt: m.joinedAt?.toISOString() || null,

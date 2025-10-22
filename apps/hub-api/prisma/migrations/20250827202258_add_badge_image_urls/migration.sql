@@ -12,29 +12,31 @@ ALTER TABLE "Membership" ADD COLUMN IF NOT EXISTS "leaveReason" TEXT;
 ALTER TABLE "Membership" ADD COLUMN IF NOT EXISTS "leftAt" TIMESTAMP(3);
 
 -- Update Badge table structure to match current schema
--- Note: This assumes Badge table structure was manually updated to current schema format
--- If not already done, the following would be needed:
--- 1. Drop old Badge table and recreate with new structure
--- 2. Update foreign key constraints
--- 3. Migrate any existing badge data
+-- Migrate from old structure (ringId, issuedTo) to new structure (membershipId)
 
--- The Badge model should have:
--- - id (primary key)
--- - membershipId (foreign key to Membership.id, unique)
--- - badgeData (JSONB)
--- - issuedAt (timestamp)
--- - revokedAt (nullable timestamp)  
--- - revocationReason (nullable text)
+-- Drop the old Badge table and recreate with new structure
+DROP TABLE IF EXISTS "Badge" CASCADE;
 
--- Add foreign key constraint for Badge.membershipId if not exists
--- This will fail if the constraint already exists, which is expected
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.table_constraints 
-        WHERE constraint_name = 'Badge_membershipId_fkey'
-    ) THEN
-        ALTER TABLE "Badge" ADD CONSTRAINT "Badge_membershipId_fkey" 
-        FOREIGN KEY ("membershipId") REFERENCES "Membership"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-    END IF;
-END $$;
+CREATE TABLE "Badge" (
+    "id" TEXT NOT NULL,
+    "membershipId" TEXT NOT NULL,
+    "badgeData" JSONB NOT NULL,
+    "issuedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "revokedAt" TIMESTAMP(3),
+    "revocationReason" TEXT,
+
+    CONSTRAINT "Badge_pkey" PRIMARY KEY ("id")
+);
+
+-- Create unique constraint on membershipId
+CREATE UNIQUE INDEX "Badge_membershipId_key" ON "Badge"("membershipId");
+
+-- Create index on membershipId for faster lookups
+CREATE INDEX "Badge_membershipId_idx" ON "Badge"("membershipId");
+
+-- Create index on issuedAt for sorting
+CREATE INDEX "Badge_issuedAt_idx" ON "Badge"("issuedAt");
+
+-- Add foreign key constraint for Badge.membershipId
+ALTER TABLE "Badge" ADD CONSTRAINT "Badge_membershipId_fkey"
+    FOREIGN KEY ("membershipId") REFERENCES "Membership"("id") ON DELETE CASCADE ON UPDATE CASCADE;

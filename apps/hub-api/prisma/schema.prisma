@@ -104,23 +104,31 @@ model Membership {
   actorDid  String   // DID of the member
   roleId    String?
   role      RingRole? @relation(fields: [roleId], references: [id])
-  
+
   status    MembershipStatus @default(PENDING)
   joinedAt  DateTime?
   leftAt    DateTime?
   updatedAt DateTime @updatedAt
-  
+
   // Application/leave details
   applicationMessage String? // Message when applying to join
   leaveReason       String? // Reason for leaving
-  
+
   // Badge relation (one-to-one)
   badgeId   String?  @unique
   badge     Badge?
-  
+
+  // Federated profile data (from DID document resolution)
+  actorName           String?   // Display name from DID doc (Tier 2 - conditional on privacy)
+  avatarUrl           String?   // Avatar URL from DID doc (Tier 2 - conditional on privacy)
+  profileUrl          String?   // Profile page URL from DID service endpoint (Tier 1 - always present)
+  instanceDomain      String?   // Parsed domain from DID for federation UX
+  profileLastFetched  DateTime? // Timestamp of last DID resolution
+  profileSource       String?   // Source of profile data: 'DID_RESOLUTION' | 'API_REQUEST' | 'MANUAL'
+
   // Metadata
   metadata  Json?    // Platform-specific data
-  
+
   @@unique([ringId, actorDid], name: "ringId_actorDid")
   @@index([ringId])
   @@index([actorDid])

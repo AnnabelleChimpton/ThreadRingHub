@@ -8,6 +8,11 @@ export interface DIDDocument {
   authentication?: (string | VerificationMethod)[];
   assertionMethod?: (string | VerificationMethod)[];
   service?: Service[];
+
+  // Federated profile data (Tier 2 - optional, depends on privacy settings)
+  name?: string;           // Display name
+  image?: string;          // Avatar URL
+  alsoKnownAs?: string[];  // Alternative identifiers (e.g., profile URLs)
 }
 
 export interface VerificationMethod {

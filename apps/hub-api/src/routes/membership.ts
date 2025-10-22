@@ -17,6 +17,8 @@ import {
   type UpdateMemberRoleInput,
 } from '../schemas/ring-schemas';
 import { generateBadge, verifyBadge, revokeBadge, isBadgeRevoked } from '../utils/badge';
+import { resolveActorProfile, validateProfileServiceEndpoint } from '../services/profile-resolver';
+import { resolveDID } from '../security/did-resolver';
 import crypto from 'crypto';
 
 // TODO: In production, load this from environment or key management service
@@ -103,6 +105,32 @@ export async function membershipRoutes(fastify: FastifyInstance) {
         }
       }
 
+      // Resolve and validate actor's DID document and profile
+      const didDocument = await resolveDID(actorDid);
+      if (!didDocument) {
+        reply.code(400).send({
+          error: 'Invalid DID',
+          message: 'Failed to resolve your DID document. Please ensure your instance is properly configured.',
+        });
+        return;
+      }
+
+      // Validate DID document has required Profile service endpoint
+      const validation = validateProfileServiceEndpoint(didDocument);
+      if (!validation.valid) {
+        reply.code(400).send({
+          error: 'Invalid DID Document',
+          message: validation.error,
+        });
+        return;
+      }
+
+      // Resolve actor profile data from DID document
+      const actorProfile = await resolveActorProfile(actorDid);
+      if (!actorProfile) {
+        logger.warn({ actorDid }, 'Failed to resolve actor profile, proceeding without profile data');
+      }
+
       // Check join policy
       let membershipStatus = 'PENDING';
       let requiresApproval = false;
@@ -163,6 +191,16 @@ export async function membershipRoutes(fastify: FastifyInstance) {
         return;
       }
 
+      // Prepare profile data for membership
+      const profileData = actorProfile ? {
+        actorName: actorProfile.actorName,
+        avatarUrl: actorProfile.avatarUrl,
+        profileUrl: actorProfile.profileUrl,
+        instanceDomain: actorProfile.instanceDomain,
+        profileLastFetched: new Date(),
+        profileSource: 'DID_RESOLUTION',
+      } : {};
+
       // Create or update membership
       const membership = await prisma.membership.upsert({
         where: {
@@ -177,6 +215,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
           joinedAt: membershipStatus === 'ACTIVE' ? new Date() : undefined,
           applicationMessage: message,
           metadata,
+          ...profileData,
         },
         create: {
           ringId: ring.id,
@@ -186,6 +225,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
           joinedAt: membershipStatus === 'ACTIVE' ? new Date() : undefined,
           applicationMessage: message,
           metadata,
+          ...profileData,
         },
       });
 
