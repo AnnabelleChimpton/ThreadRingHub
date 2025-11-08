@@ -2,14 +2,15 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { nanoid } from 'nanoid';
 import { prisma } from '../database/prisma';
 import { logger } from '../utils/logger';
-import { 
-  authenticateActor, 
-  requireVerifiedActor, 
+import {
+  authenticateActor,
+  requireVerifiedActor,
   requireNotBlocked,
   requireMembership,
   requirePermission,
-  auditLogger 
+  auditLogger
 } from '../security/middleware';
+import { registerActor } from '../security/actor-manager';
 import {
   JoinRingSchema,
   UpdateMemberRoleSchema,
@@ -130,6 +131,15 @@ export async function membershipRoutes(fastify: FastifyInstance) {
       if (!actorProfile) {
         logger.warn({ actorDid }, 'Failed to resolve actor profile, proceeding without profile data');
       }
+
+      // Ensure actor is registered in the Actor table
+      // This handles the case where middleware auto-registration failed
+      await registerActor({
+        did: actorDid,
+        name: actorProfile?.name,
+        type: 'USER',
+        instanceUrl: actorProfile?.instanceDomain,
+      });
 
       // Check join policy
       let membershipStatus = 'PENDING';

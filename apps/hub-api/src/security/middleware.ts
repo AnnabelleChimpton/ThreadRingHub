@@ -134,7 +134,18 @@ export async function authenticateActor(
           trusted: actor.trusted 
         }, 'Actor attached to request');
       } else {
-        logger.error({ actorDid: result.actorDid }, 'Failed to get or register actor');
+        // Registration failed, but HTTP signature was valid
+        // Allow request to proceed with minimal actor info from signature
+        // The valid signature itself proves DID ownership (verified = true)
+        logger.warn({ actorDid: result.actorDid }, 'Actor registration failed during auth, using signature data');
+
+        request.actor = {
+          did: result.actorDid,
+          verified: true, // Signature verification proves DID ownership
+          trusted: false,
+          name: undefined,
+        };
+        request.keyId = result.keyId;
       }
     } else {
       logger.warn('No actor DID found in signature verification result');
