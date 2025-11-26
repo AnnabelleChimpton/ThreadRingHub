@@ -99,15 +99,13 @@ async function buildApp() {
     },
   });
 
-  // DID Generator page - serve HTML directly
-  // Works in both dev (src/) and prod (dist/) by going up to project root
-  fastify.get('/generator', async (_request, reply) => {
-    // Try multiple possible locations
+  // Helper to find and serve HTML files from public directory
+  const servePublicHtml = (filename: string) => async (_request: any, reply: any) => {
     const possiblePaths = [
-      path.join(__dirname, '..', 'public', 'generator.html'),      // from src/
-      path.join(__dirname, '..', '..', 'public', 'generator.html'), // from dist/
-      path.join(process.cwd(), 'public', 'generator.html'),         // from project root
-      path.join(process.cwd(), 'apps', 'hub-api', 'public', 'generator.html'), // from monorepo root
+      path.join(__dirname, '..', 'public', filename),      // from src/
+      path.join(__dirname, '..', '..', 'public', filename), // from dist/
+      path.join(process.cwd(), 'public', filename),         // from project root
+      path.join(process.cwd(), 'apps', 'hub-api', 'public', filename), // from monorepo root
     ];
 
     for (const htmlPath of possiblePaths) {
@@ -117,8 +115,12 @@ async function buildApp() {
       }
     }
 
-    reply.code(404).send({ error: 'Generator page not found' });
-  });
+    reply.code(404).send({ error: `${filename} not found` });
+  };
+
+  // Public pages
+  fastify.get('/generator', servePublicHtml('generator.html'));
+  fastify.get('/guide', servePublicHtml('guide.html'));
 
   // Root redirect to docs
   fastify.get('/', async (_request, reply) => {

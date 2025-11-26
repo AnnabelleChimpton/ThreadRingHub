@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Personal Site Integration Guide - ThreadRing</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-emphasis: #1f6feb;
+      --success: #3fb950;
+      --warning: #d29922;
+      --danger: #f85149;
+      --code-bg: #0d1117;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    nav {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      margin-bottom: 2rem;
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    nav a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      text-decoration: underline;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h2 {
+      font-size: 1.5rem;
+      margin-top: 2rem;
+      margin-bottom: 1rem;
+      padding-bottom: 0.3rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h3 {
+      font-size: 1.25rem;
+      margin-top: 1.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    p {
+      margin-bottom: 1rem;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    code {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.15rem 0.4rem;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      font-size: 0.9em;
+    }
+
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-x: auto;
+      margin-bottom: 1rem;
+    }
+
+    pre code {
+      border: none;
+      padding: 0;
+      background: none;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 1rem;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.75rem;
+      text-align: left;
+    }
+
+    th {
+      background: var(--card);
+    }
+
+    ul, ol {
+      margin-bottom: 1rem;
+      padding-left: 2rem;
+    }
+
+    li {
+      margin-bottom: 0.5rem;
+    }
+
+    .toc {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .toc h2 {
+      margin-top: 0;
+      border: none;
+    }
+
+    .toc ul {
+      list-style: none;
+      padding-left: 0;
+    }
+
+    .toc li {
+      margin-bottom: 0.5rem;
+    }
+
+    .toc a {
+      text-decoration: none;
+    }
+
+    .toc a:hover {
+      text-decoration: underline;
+    }
+
+    .note {
+      background: rgba(88, 166, 255, 0.1);
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .warning {
+      background: rgba(210, 153, 34, 0.1);
+      border: 1px solid var(--warning);
+      border-radius: 6px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .quick-links {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .quick-link {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      text-decoration: none;
+      color: var(--text);
+      transition: border-color 0.2s;
+    }
+
+    .quick-link:hover {
+      border-color: var(--accent);
+    }
+
+    .quick-link h3 {
+      margin: 0 0 0.5rem 0;
+      color: var(--accent);
+    }
+
+    .quick-link p {
+      margin: 0;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    footer {
+      margin-top: 4rem;
+      padding-top: 2rem;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav>
+      <strong>ThreadRing</strong>
+      <a href="/docs">API Docs</a>
+      <a href="/generator">DID Generator</a>
+      <a href="https://github.com/anthropics/threadring-hub" target="_blank">GitHub</a>
+    </nav>
+
+    <h1>Personal Site Integration Guide</h1>
+    <p style="color: var(--text-muted); margin-bottom: 2rem;">
+      Connect your personal website to the ThreadRing network. Join rings, submit posts, and display membership badges.
+    </p>
+
+    <div class="quick-links">
+      <a href="/generator" class="quick-link">
+        <h3>DID Generator</h3>
+        <p>Generate your keys and DID document</p>
+      </a>
+      <a href="/docs" class="quick-link">
+        <h3>API Reference</h3>
+        <p>Complete API documentation</p>
+      </a>
+      <a href="#examples" class="quick-link">
+        <h3>Code Examples</h3>
+        <p>JavaScript, Python, and curl</p>
+      </a>
+    </div>
+
+    <div class="toc">
+      <h2>Contents</h2>
+      <ul>
+        <li><a href="#concepts">Concepts</a></li>
+        <li><a href="#quick-start">Quick Start</a></li>
+        <li><a href="#step1">Step 1: Generate Your Keys</a></li>
+        <li><a href="#step2">Step 2: Create Your DID Document</a></li>
+        <li><a href="#step3">Step 3: Host Your DID Document</a></li>
+        <li><a href="#step4">Step 4: Join a Ring</a></li>
+        <li><a href="#step5">Step 5: Submit Posts</a></li>
+        <li><a href="#step6">Step 6: Display Your Badges</a></li>
+        <li><a href="#examples">Code Examples</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+      </ul>
+    </div>
+
+    <h2 id="concepts">Concepts</h2>
+
+    <h3>What is a DID?</h3>
+    <p>A <strong>Decentralized Identifier (DID)</strong> is a globally unique identifier that you control. Unlike usernames on centralized platforms, your DID is tied to your domain and verified cryptographically.</p>
+    <p>Your DID looks like: <code>did:web:yourdomain.com</code></p>
+    <p>When RingHub needs to verify you, it fetches your DID document from your website and checks your cryptographic signature.</p>
+
+    <h3>What is HTTP Signature Authentication?</h3>
+    <p>Instead of passwords or API keys, ThreadRing uses <strong>HTTP Signatures</strong>. Every request you make is signed with your private key. RingHub verifies the signature using the public key in your DID document.</p>
+    <p>This means:</p>
+    <ul>
+      <li>No passwords to leak</li>
+      <li>No tokens to expire</li>
+      <li>Your identity is tied to your domain</li>
+      <li>You control your own keys</li>
+    </ul>
+
+    <h3>What is a Ring?</h3>
+    <p>Rings are curated communities. When you join a ring:</p>
+    <ul>
+      <li>You receive a verifiable badge proving membership</li>
+      <li>You can submit posts from your site to the ring's feed</li>
+      <li>You appear in the ring's member list</li>
+      <li>Your profile links back to your personal site</li>
+    </ul>
+
+    <h2 id="quick-start">Quick Start</h2>
+
+    <p><strong>Prerequisites:</strong></p>
+    <ul>
+      <li>A domain with HTTPS (e.g., <code>yourdomain.com</code>)</li>
+      <li>Ability to host a static JSON file at <code>/.well-known/did.json</code></li>
+      <li>Basic programming knowledge (Node.js, Python, or shell scripting)</li>
+    </ul>
+
+    <p><strong>Overview:</strong></p>
+    <ol>
+      <li>Generate an Ed25519 keypair</li>
+      <li>Create a DID document with your public key</li>
+      <li>Host the DID document on your site</li>
+      <li>Sign HTTP requests to join rings and submit posts</li>
+    </ol>
+
+    <div class="note">
+      <strong>Fastest way:</strong> Use our <a href="/generator">DID Generator</a> to create your keys and DID document instantly.
+    </div>
+
+    <h2 id="step1">Step 1: Generate Your Keys</h2>
+
+    <p>You need an Ed25519 keypair. The private key signs requests; the public key goes in your DID document.</p>
+    <p>Use our <a href="/generator">web-based generator</a> or generate keys programmatically:</p>
+
+    <h3>Using Node.js</h3>
+    <pre><code>npm install @noble/ed25519 @noble/hashes
+
+// generate-keys.js
+import * as ed from '@noble/ed25519';
+import { sha512 } from '@noble/hashes/sha512';
+
+ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
+
+const privateKey = ed.utils.randomPrivateKey();
+const publicKey = await ed.getPublicKey(privateKey);
+
+console.log('Private Key:', Buffer.from(privateKey).toString('base64'));
+console.log('Public Key:', Buffer.from(publicKey).toString('base64'));</code></pre>
+
+    <h3>Using Python</h3>
+    <pre><code>pip install pynacl
+
+from nacl.signing import SigningKey
+import base64
+
+signing_key = SigningKey.generate()
+private_key = signing_key.encode()
+public_key = signing_key.verify_key.encode()
+
+print("Private Key:", base64.b64encode(private_key).decode())
+print("Public Key:", base64.b64encode(public_key).decode())</code></pre>
+
+    <div class="warning">
+      <strong>Security:</strong> Never share your private key. Store it securely as an environment variable.
+    </div>
+
+    <h2 id="step2">Step 2: Create Your DID Document</h2>
+
+    <p>Create a file called <code>did.json</code>:</p>
+
+    <pre><code>{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/suites/ed25519-2020/v1"
+  ],
+  "id": "did:web:yourdomain.com",
+  "verificationMethod": [
+    {
+      "id": "did:web:yourdomain.com#key-1",
+      "type": "Ed25519VerificationKey2020",
+      "controller": "did:web:yourdomain.com",
+      "publicKeyBase64": "YOUR_PUBLIC_KEY_HERE"
+    }
+  ],
+  "authentication": ["did:web:yourdomain.com#key-1"],
+  "assertionMethod": ["did:web:yourdomain.com#key-1"],
+  "service": [
+    {
+      "id": "did:web:yourdomain.com#profile",
+      "type": "Profile",
+      "serviceEndpoint": "https://yourdomain.com/"
+    }
+  ],
+  "name": "Your Display Name",
+  "image": "https://yourdomain.com/avatar.jpg"
+}</code></pre>
+
+    <table>
+      <tr><th>Field</th><th>Required</th><th>Description</th></tr>
+      <tr><td><code>id</code></td><td>Yes</td><td>Your DID: <code>did:web:yourdomain.com</code></td></tr>
+      <tr><td><code>verificationMethod</code></td><td>Yes</td><td>Array containing your public key(s)</td></tr>
+      <tr><td><code>authentication</code></td><td>Yes</td><td>References to keys that can sign requests</td></tr>
+      <tr><td><code>service[type=Profile]</code></td><td>Yes</td><td>URL to your profile page</td></tr>
+      <tr><td><code>name</code></td><td>No</td><td>Your display name</td></tr>
+      <tr><td><code>image</code></td><td>No</td><td>URL to your avatar</td></tr>
+    </table>
+
+    <h2 id="step3">Step 3: Host Your DID Document</h2>
+
+    <p>Upload your <code>did.json</code> to:</p>
+    <pre><code>https://yourdomain.com/.well-known/did.json</code></pre>
+
+    <p>Verify it works:</p>
+    <pre><code>curl https://yourdomain.com/.well-known/did.json</code></pre>
+
+    <h2 id="step4">Step 4: Join a Ring</h2>
+
+    <h3>Find a Ring</h3>
+    <p>Browse available rings (no authentication needed):</p>
+    <pre><code>curl https://ringhub.io/trp/rings?visibility=PUBLIC&limit=10</code></pre>
+
+    <h3>Sign Your Request</h3>
+    <p>To join a ring, you must sign your HTTP request:</p>
+    <ol>
+      <li>Build the signing string (newline-separated headers)</li>
+      <li>Sign with your Ed25519 private key</li>
+      <li>Add the Signature header to your request</li>
+    </ol>
+
+    <pre><code>POST /trp/join HTTP/1.1
+Host: ringhub.io
+Date: Mon, 25 Nov 2024 12:00:00 GMT
+Content-Type: application/json
+Digest: sha-256=...
+Signature: keyId="did:web:yourdomain.com#key-1",algorithm="ed25519",headers="(request-target) host date digest",signature="..."
+
+{"ringSlug": "indie-web"}</code></pre>
+
+    <h2 id="step5">Step 5: Submit Posts</h2>
+
+    <p>When you publish a new post on your site, submit it to your rings:</p>
+    <pre><code>POST /trp/submit HTTP/1.1
+Host: ringhub.io
+...
+Signature: ...
+
+{
+  "ringSlug": "indie-web",
+  "uri": "https://yourdomain.com/posts/my-article",
+  "digest": "sha256:abc123...",
+  "metadata": {
+    "title": "My New Article",
+    "publishedAt": "2024-11-25T12:00:00Z"
+  }
+}</code></pre>
+
+    <h2 id="step6">Step 6: Display Your Badges</h2>
+
+    <p>Show off your ring memberships on your site:</p>
+    <pre><code>&lt;!-- 88x31 badge --&gt;
+&lt;a href="https://ringhub.io/rings/indie-web"&gt;
+  &lt;img src="https://ringhub.io/badges/YOUR_BADGE_ID.png"
+       alt="Member of indie-web ring"
+       width="88" height="31"&gt;
+&lt;/a&gt;</code></pre>
+
+    <p>Get your badge URLs:</p>
+    <pre><code>curl https://ringhub.io/trp/actors/did:web:yourdomain.com/badges</code></pre>
+
+    <h2 id="examples">Code Examples</h2>
+
+    <h3>JavaScript Client</h3>
+    <pre><code>import * as ed from '@noble/ed25519';
+import { sha256 } from '@noble/hashes/sha256';
+import { sha512 } from '@noble/hashes/sha512';
+
+ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
+
+class ThreadRingClient {
+  constructor({ hubUrl, did, privateKey }) {
+    this.hubUrl = hubUrl;
+    this.did = did;
+    this.keyId = `${did}#key-1`;
+    this.privateKey = Buffer.from(privateKey, 'base64');
+  }
+
+  async signRequest(method, path, body = null) {
+    const host = new URL(this.hubUrl).host;
+    const date = new Date().toUTCString();
+    const headers = { host, date };
+
+    const lines = [`(request-target): ${method.toLowerCase()} ${path}`];
+    lines.push(`host: ${host}`);
+    lines.push(`date: ${date}`);
+
+    if (body) {
+      const bodyStr = JSON.stringify(body);
+      const digest = `sha-256=${Buffer.from(sha256(bodyStr)).toString('base64')}`;
+      headers.digest = digest;
+      headers['content-type'] = 'application/json';
+      lines.push(`digest: ${digest}`);
+    }
+
+    const signingString = lines.join('\n');
+    const headersParam = body
+      ? '(request-target) host date digest'
+      : '(request-target) host date';
+
+    const messageBytes = new TextEncoder().encode(signingString);
+    const signatureBytes = await ed.sign(messageBytes, this.privateKey);
+    const signature = Buffer.from(signatureBytes).toString('base64');
+
+    headers.signature = `keyId="${this.keyId}",algorithm="ed25519",headers="${headersParam}",signature="${signature}"`;
+    return headers;
+  }
+
+  async join(ringSlug) {
+    const path = '/trp/join';
+    const body = { ringSlug };
+    const headers = await this.signRequest('POST', path, body);
+
+    const response = await fetch(`${this.hubUrl}${path}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
+    return response.json();
+  }
+}
+
+// Usage
+const client = new ThreadRingClient({
+  hubUrl: 'https://ringhub.io',
+  did: 'did:web:yourdomain.com',
+  privateKey: process.env.THREADRING_PRIVATE_KEY
+});
+
+await client.join('indie-web');</code></pre>
+
+    <h3>Python Client</h3>
+    <pre><code>import hashlib
+import base64
+import json
+from datetime import datetime
+from urllib.parse import urlparse
+from nacl.signing import SigningKey
+
+class ThreadRingClient:
+    def __init__(self, hub_url, did, private_key_base64):
+        self.hub_url = hub_url
+        self.did = did
+        self.key_id = f"{did}#key-1"
+        self.signing_key = SigningKey(base64.b64decode(private_key_base64))
+
+    def _sign_request(self, method, path, body=None):
+        host = urlparse(self.hub_url).netloc
+        date = datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')
+
+        headers = {'Host': host, 'Date': date}
+        lines = [f'(request-target): {method.lower()} {path}']
+        lines.append(f'host: {host}')
+        lines.append(f'date: {date}')
+
+        if body:
+            body_str = json.dumps(body)
+            digest_bytes = hashlib.sha256(body_str.encode()).digest()
+            digest = f'sha-256={base64.b64encode(digest_bytes).decode()}'
+            headers['Digest'] = digest
+            headers['Content-Type'] = 'application/json'
+            lines.append(f'digest: {digest}')
+
+        signing_string = '\n'.join(lines)
+        headers_param = '(request-target) host date digest' if body else '(request-target) host date'
+
+        signed = self.signing_key.sign(signing_string.encode())
+        signature = base64.b64encode(signed.signature).decode()
+
+        headers['Signature'] = f'keyId="{self.key_id}",algorithm="ed25519",headers="{headers_param}",signature="{signature}"'
+        return headers
+
+    def join(self, ring_slug):
+        import requests
+        path = '/trp/join'
+        body = {'ringSlug': ring_slug}
+        headers = self._sign_request('POST', path, body)
+        response = requests.post(f'{self.hub_url}{path}', headers=headers, json=body)
+        return response.json()
+
+# Usage
+import os
+client = ThreadRingClient(
+    hub_url='https://ringhub.io',
+    did='did:web:yourdomain.com',
+    private_key_base64=os.environ['THREADRING_PRIVATE_KEY']
+)
+result = client.join('indie-web')</code></pre>
+
+    <h2 id="troubleshooting">Troubleshooting</h2>
+
+    <h3>"Unknown key" Error</h3>
+    <p><strong>Problem:</strong> RingHub can't find your public key.</p>
+    <p><strong>Solutions:</strong></p>
+    <ol>
+      <li>Verify your DID document is accessible: <code>curl https://yourdomain.com/.well-known/did.json</code></li>
+      <li>Check the <code>keyId</code> in your signature matches your DID document</li>
+      <li>Ensure your public key is correctly base64-encoded</li>
+    </ol>
+
+    <h3>"Invalid signature" Error</h3>
+    <p><strong>Problem:</strong> The signature doesn't verify.</p>
+    <p><strong>Checklist:</strong></p>
+    <ul>
+      <li><strong>Signing string format:</strong> Each line must end with <code>\n</code> (except the last)</li>
+      <li><strong>Header order:</strong> Must match the <code>headers</code> parameter exactly</li>
+      <li><strong>Case sensitivity:</strong> <code>(request-target)</code> must be lowercase</li>
+      <li><strong>Date format:</strong> Use RFC 2822: <code>Mon, 25 Nov 2024 12:00:00 GMT</code></li>
+      <li><strong>Digest calculation:</strong> Must be SHA-256 of the exact request body bytes</li>
+    </ul>
+
+    <h3>"Signature expired" Error</h3>
+    <p><strong>Problem:</strong> The request took too long or clock skew.</p>
+    <p><strong>Solutions:</strong></p>
+    <ol>
+      <li>Ensure your server's clock is synchronized (use NTP)</li>
+      <li>Generate the date header immediately before sending</li>
+      <li>Signature validity window is 5 minutes</li>
+    </ol>
+
+    <h3>DID Document Not Found</h3>
+    <p><strong>Problem:</strong> 404 when fetching DID document.</p>
+    <p><strong>Solutions:</strong></p>
+    <ol>
+      <li>File must be at <code>/.well-known/did.json</code></li>
+      <li>Server must return <code>Content-Type: application/json</code></li>
+      <li>HTTPS is required (no HTTP)</li>
+    </ol>
+
+    <footer>
+      <p>
+        <a href="/docs">API Documentation</a> ·
+        <a href="/generator">DID Generator</a> ·
+        <a href="https://github.com/anthropics/threadring-hub">GitHub</a>
+      </p>
+      <p style="margin-top: 1rem;">ThreadRing - Decentralized communities for the open web</p>
+    </footer>
+  </div>
+</body>
+</html>
