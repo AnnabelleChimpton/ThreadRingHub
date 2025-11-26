@@ -50,6 +50,7 @@ export const RingQuerySchema = z.object({
   offset: z.coerce.number().min(0).default(0),
   sort: z.enum(['created', 'updated', 'name', 'members']).default('created'),
   order: z.enum(['asc', 'desc']).default('desc'),
+  memberDid: z.string().optional(),
 });
 
 // Ring member query parameters

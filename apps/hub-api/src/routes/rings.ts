@@ -824,16 +824,9 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         },
     }, async (request, reply) => {
         try {
-            const { search, visibility, limit, offset, sort, order } = request.query;
+            const { search, visibility, limit, offset, sort, order, memberDid } = request.query;
 
             const where: any = {};
-
-            // Only show public rings to unauthenticated users
-            if (!request.actor) {
-                where.visibility = 'PUBLIC';
-            } else if (visibility) {
-                where.visibility = visibility;
-            }
 
             // Search functionality
             if (search) {
@@ -842,6 +835,24 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                     { description: { contains: search, mode: 'insensitive' } },
                     { shortCode: { contains: search, mode: 'insensitive' } },
                 ];
+            }
+
+            // Only show public rings to unauthenticated users
+            // If viewing someone else's rings, also restrict to PUBLIC
+            if (!request.actor || (memberDid && request.actor.did !== memberDid)) {
+                where.visibility = 'PUBLIC';
+            } else if (visibility) {
+                where.visibility = visibility;
+            }
+
+            // Filter by membership if requested
+            if (memberDid) {
+                where.memberships = {
+                    some: {
+                        actorDid: memberDid,
+                        status: 'ACTIVE'
+                    }
+                };
             }
 
             // Build order clause
