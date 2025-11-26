@@ -141,7 +141,8 @@ export async function contentRoutes(fastify: FastifyInstance) {
             },
           });
 
-          if (!membership) {
+          // Allow admins to bypass membership requirement
+          if (!membership && !request.actor!.isAdmin) {
             reply.code(403).send({
               error: 'Members only',
               message: 'Only ring members can submit content',
@@ -808,7 +809,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
       requireVerifiedActor,
       requireNotBlocked(),
       requireMembership(),
-      requirePermission('manage_ring'),
+      requirePermission('view_audit_log'),
     ],
     schema: {
       params: {
@@ -825,18 +826,19 @@ export async function contentRoutes(fastify: FastifyInstance) {
           offset: { type: 'number', minimum: 0, default: 0 },
           action: { type: 'string' },
           actorDid: { type: 'string' },
+          targetDid: { type: 'string' },
           since: { type: 'string' },
           until: { type: 'string' },
         },
       },
-      tags: ['content'],
+      tags: ['audit'],
       summary: 'Get audit log',
       security: [{ httpSignature: [] }],
     },
   }, async (request, reply) => {
     try {
       const { slug } = request.params;
-      const { limit, offset, action, actorDid, since, until } = request.query;
+      const { limit, offset, action, actorDid, targetDid, since, until } = request.query;
 
       // Find the ring
       const ring = await prisma.ring.findUnique({
@@ -852,15 +854,13 @@ export async function contentRoutes(fastify: FastifyInstance) {
       }
 
       // Build query filters
-      const where: any = { ringId: ring.id };
+      const where: any = {
+        ringId: ring.id,
+      };
 
-      if (action) {
-        where.action = { contains: action };
-      }
-
-      if (actorDid) {
-        where.actorDid = actorDid;
-      }
+      if (action) where.action = action;
+      if (actorDid) where.actorDid = actorDid;
+      if (targetDid) where.targetDid = targetDid;
 
       if (since) {
         where.timestamp = { ...where.timestamp, gte: new Date(since) };
@@ -870,8 +870,8 @@ export async function contentRoutes(fastify: FastifyInstance) {
         where.timestamp = { ...where.timestamp, lte: new Date(until) };
       }
 
-      // Get audit entries
-      const [entries, total] = await Promise.all([
+      // Get audit logs
+      const [logs, total] = await Promise.all([
         prisma.auditLog.findMany({
           where,
           take: limit,
@@ -882,18 +882,19 @@ export async function contentRoutes(fastify: FastifyInstance) {
       ]);
 
       const response: AuditListResponse = {
-        entries: entries.map(entry => ({
-          id: entry.id,
-          metadata: entry.metadata as any,
-          actorDid: entry.actorDid,
-          action: entry.action,
-          targetDid: entry.targetDid || undefined,
-          timestamp: entry.timestamp.toISOString()
+        entries: logs.map(log => ({
+          id: log.id,
+          ringId: log.ringId,
+          action: log.action,
+          actorDid: log.actorDid,
+          targetDid: log.targetDid,
+          metadata: log.metadata as Record<string, any>,
+          timestamp: log.timestamp.toISOString(),
         })),
+        total,
         limit,
         offset,
-        total,
-        hasMore: total > offset + limit
+        hasMore: offset + limit < total,
       };
 
       reply.send(response);

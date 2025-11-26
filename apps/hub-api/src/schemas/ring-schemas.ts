@@ -149,6 +149,7 @@ export const AuditQuerySchema = z.object({
   offset: z.coerce.number().min(0).default(0),
   action: z.string().optional(),
   actorDid: z.string().optional(),
+  targetDid: z.string().optional(),
   since: z.string().optional(), // ISO date string
   until: z.string().optional(), // ISO date string
 });

@@ -12,6 +12,7 @@ declare module 'fastify' {
       name?: string;
       verified: boolean;
       trusted: boolean;
+      isAdmin: boolean;
     };
     keyId?: string;
   }
@@ -125,6 +126,7 @@ export async function authenticateActor(
           name: actor.name || undefined,
           verified: actor.verified,
           trusted: actor.trusted,
+          isAdmin: actor.isAdmin,
         };
         request.keyId = result.keyId;
 
@@ -143,6 +145,7 @@ export async function authenticateActor(
           did: result.actorDid,
           verified: true, // Signature verification proves DID ownership
           trusted: false,
+          isAdmin: false,
           name: undefined,
         };
         request.keyId = result.keyId;

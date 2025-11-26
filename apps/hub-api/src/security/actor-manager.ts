@@ -19,6 +19,7 @@ export interface ActorInfo {
   instanceUrl: string | null;
   verified: boolean;
   trusted: boolean;
+  isAdmin: boolean;
   lastSeenAt: Date;
 }
 
@@ -40,7 +41,7 @@ export async function registerActor(
         where: { did: registration.did },
         data: { lastSeenAt: new Date() },
       });
-      
+
       return {
         id: updated.id,
         did: updated.did,
@@ -49,6 +50,7 @@ export async function registerActor(
         instanceUrl: updated.instanceUrl,
         verified: updated.verified,
         trusted: updated.trusted,
+        isAdmin: updated.isAdmin,
         lastSeenAt: updated.lastSeenAt,
       };
     }
@@ -80,9 +82,9 @@ export async function registerActor(
       },
     });
 
-    logger.info({ 
-      did: registration.did, 
-      verified 
+    logger.info({
+      did: registration.did,
+      verified
     }, 'Actor registered');
 
     return {
@@ -93,6 +95,7 @@ export async function registerActor(
       instanceUrl: actor.instanceUrl,
       verified: actor.verified,
       trusted: actor.trusted,
+      isAdmin: actor.isAdmin,
       lastSeenAt: actor.lastSeenAt,
     };
   } catch (error) {
@@ -128,6 +131,7 @@ export async function getActor(did: string): Promise<ActorInfo | null> {
       instanceUrl: actor.instanceUrl,
       verified: actor.verified,
       trusted: actor.trusted,
+      isAdmin: actor.isAdmin,
       lastSeenAt: actor.lastSeenAt,
     };
   } catch (error) {
@@ -146,7 +150,7 @@ export async function verifyActor(did: string): Promise<boolean> {
 
     await prisma.actor.update({
       where: { did },
-      data: { 
+      data: {
         verified,
         lastSeenAt: new Date(),
       },
@@ -175,10 +179,10 @@ export async function setActorTrust(
     });
 
     // Log the trust change
-    logger.info({ 
-      actorDid: did, 
-      trusted, 
-      trustedBy 
+    logger.info({
+      actorDid: did,
+      trusted,
+      trustedBy
     }, 'Actor trust level updated');
 
     return true;
@@ -205,7 +209,7 @@ export async function registerActorKey(
     }
 
     // Check if the key is in the DID document
-    const keyExists = didDocument.verificationMethod?.some(vm => 
+    const keyExists = didDocument.verificationMethod?.some(vm =>
       vm.id === keyId || vm.id.endsWith(`#${keyId}`)
     );
 
@@ -268,6 +272,7 @@ export async function listActors(options: {
       instanceUrl: actor.instanceUrl,
       verified: actor.verified,
       trusted: actor.trusted,
+      isAdmin: actor.isAdmin,
       lastSeenAt: actor.lastSeenAt,
     }));
   } catch (error) {
@@ -319,11 +324,11 @@ export async function blockActor(
       },
     });
 
-    logger.info({ 
-      actorDid, 
-      ringId, 
-      blockedBy, 
-      reason 
+    logger.info({
+      actorDid,
+      ringId,
+      blockedBy,
+      reason
     }, 'Actor blocked');
 
     return true;
