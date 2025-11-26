@@ -44,6 +44,8 @@ export async function authenticateActor(
       // For public endpoints, authentication failure is allowed - just skip setting actor
       if (isPublic) {
         logger.info({ url: request.url, method: request.method, error: result.error }, 'Authentication failed for public endpoint - continuing without actor');
+        // Add debug header to help diagnose silent auth failures
+        reply.header('X-RingHub-Auth-Error', result.error || 'Unknown authentication error');
         return;
       }
       // Check if this is an admin account that should bypass signature verification
