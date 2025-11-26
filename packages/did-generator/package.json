@@ -1,0 +1,40 @@
+{
+  "name": "@threadring/did-generator",
+  "version": "1.0.0",
+  "description": "Generate DID documents and keypairs for ThreadRing",
+  "main": "dist/index.js",
+  "bin": {
+    "threadring-did": "dist/cli.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "dev": "tsx src/cli.ts"
+  },
+  "keywords": [
+    "threadring",
+    "did",
+    "decentralized-identity",
+    "ed25519",
+    "http-signatures"
+  ],
+  "author": "ThreadRing",
+  "license": "MIT",
+  "dependencies": {
+    "@noble/ed25519": "^2.1.0",
+    "@noble/hashes": "^1.4.0",
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

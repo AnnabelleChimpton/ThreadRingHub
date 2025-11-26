@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ThreadRing DID Generator</title>
+  <style>
+    :root {
+      --bg: #1a1a2e;
+      --card: #16213e;
+      --accent: #e94560;
+      --text: #eee;
+      --muted: #888;
+      --success: #4ade80;
+      --warning: #facc15;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 2rem;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 0.5rem;
+      color: var(--accent);
+    }
+
+    .subtitle {
+      text-align: center;
+      color: var(--muted);
+      margin-bottom: 2rem;
+    }
+
+    .security-notice {
+      background: rgba(250, 204, 21, 0.1);
+      border: 1px solid var(--warning);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 2rem;
+      text-align: center;
+    }
+
+    .security-notice strong {
+      color: var(--warning);
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .card h2 {
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .step-number {
+      background: var(--accent);
+      color: white;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    input[type="text"],
+    input[type="url"] {
+      width: 100%;
+      padding: 0.75rem;
+      background: var(--bg);
+      border: 1px solid #333;
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 16px;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .btn {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 1rem 2rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      width: 100%;
+      transition: opacity 0.2s;
+    }
+
+    .btn:hover {
+      opacity: 0.9;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: #333;
+      margin-top: 0.5rem;
+    }
+
+    .output-area {
+      position: relative;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 200px;
+      padding: 1rem;
+      background: #0d1117;
+      border: 1px solid #333;
+      border-radius: 6px;
+      color: #7ee787;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 13px;
+      resize: vertical;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      background: #333;
+      color: var(--text);
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .copy-btn:hover {
+      background: #444;
+    }
+
+    .warning-box {
+      background: rgba(233, 69, 96, 0.1);
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .warning-box h3 {
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .success-box {
+      background: rgba(74, 222, 128, 0.1);
+      border: 1px solid var(--success);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .success-box h3 {
+      color: var(--success);
+      margin-bottom: 0.5rem;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid #333;
+    }
+
+    .info-row:last-child {
+      border-bottom: none;
+    }
+
+    .info-label {
+      color: var(--muted);
+    }
+
+    .info-value {
+      font-family: monospace;
+      word-break: break-all;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 3rem;
+      color: var(--muted);
+    }
+
+    footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .nav-links {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .nav-links a {
+      color: var(--accent);
+      text-decoration: none;
+      margin: 0 1rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="nav-links">
+      <a href="/docs">API Documentation</a> |
+      <a href="https://github.com/anthropics/threadring-hub" target="_blank">GitHub</a>
+    </div>
+
+    <h1>ThreadRing DID Generator</h1>
+    <p class="subtitle">Generate your decentralized identity for the ThreadRing network</p>
+
+    <div class="security-notice">
+      <strong>100% Client-Side</strong> - Your private key is generated in your browser and never sent to any server.
+    </div>
+
+    <!-- Step 1: Enter Domain -->
+    <div class="card" id="step1">
+      <h2><span class="step-number">1</span> Enter Your Domain</h2>
+
+      <div class="form-group">
+        <label for="domain">Domain (required)</label>
+        <input type="text" id="domain" placeholder="example.com" required>
+      </div>
+
+      <div class="form-group">
+        <label for="name">Display Name (optional)</label>
+        <input type="text" id="name" placeholder="Alice Smith">
+      </div>
+
+      <div class="form-group">
+        <label for="avatar">Avatar URL (optional)</label>
+        <input type="url" id="avatar" placeholder="https://example.com/avatar.jpg">
+      </div>
+
+      <div class="form-group">
+        <label for="profile">Profile URL (optional, defaults to domain root)</label>
+        <input type="url" id="profile" placeholder="https://example.com/about">
+      </div>
+
+      <button class="btn" id="generateBtn" onclick="generate()">
+        Generate DID & Keys
+      </button>
+    </div>
+
+    <!-- Step 2: Private Key (hidden until generated) -->
+    <div class="card hidden" id="step2">
+      <h2><span class="step-number">2</span> Save Your Private Key</h2>
+
+      <div class="warning-box">
+        <h3>Keep This Secret!</h3>
+        <p>Your private key is like a password. Never share it or commit it to version control.</p>
+      </div>
+
+      <div class="success-box">
+        <h3>Your Identity</h3>
+        <div class="info-row">
+          <span class="info-label">DID:</span>
+          <span class="info-value" id="didDisplay"></span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Key ID:</span>
+          <span class="info-value" id="keyIdDisplay"></span>
+        </div>
+      </div>
+
+      <label>Private Key (Base64)</label>
+      <div class="output-area">
+        <textarea id="privateKeyOutput" readonly></textarea>
+        <button class="copy-btn" onclick="copyToClipboard('privateKeyOutput')">Copy</button>
+      </div>
+
+      <button class="btn btn-secondary" onclick="downloadPrivateKey()">
+        Download private-key.txt
+      </button>
+    </div>
+
+    <!-- Step 3: DID Document (hidden until generated) -->
+    <div class="card hidden" id="step3">
+      <h2><span class="step-number">3</span> Host Your DID Document</h2>
+
+      <p style="margin-bottom: 1rem; color: var(--muted);">
+        Upload this file to: <code id="didUrl" style="color: var(--success);"></code>
+      </p>
+
+      <label>did.json</label>
+      <div class="output-area">
+        <textarea id="didDocOutput" readonly></textarea>
+        <button class="copy-btn" onclick="copyToClipboard('didDocOutput')">Copy</button>
+      </div>
+
+      <button class="btn btn-secondary" onclick="downloadDIDDoc()">
+        Download did.json
+      </button>
+    </div>
+
+    <!-- Step 4: Next Steps (hidden until generated) -->
+    <div class="card hidden" id="step4">
+      <h2><span class="step-number">4</span> Next Steps</h2>
+
+      <ol style="padding-left: 1.5rem; line-height: 2;">
+        <li>Save your private key as an environment variable:
+          <code style="display: block; background: #0d1117; padding: 0.5rem; margin: 0.5rem 0; border-radius: 4px;">
+            export THREADRING_PRIVATE_KEY="..."
+          </code>
+        </li>
+        <li>Upload <code>did.json</code> to your website's <code>/.well-known/</code> folder</li>
+        <li>Verify it works:
+          <code style="display: block; background: #0d1117; padding: 0.5rem; margin: 0.5rem 0; border-radius: 4px;" id="verifyCmd"></code>
+        </li>
+        <li>Join rings using the <a href="/docs" style="color: var(--accent);">API</a></li>
+      </ol>
+
+      <a href="https://github.com/anthropics/threadring-hub/blob/main/docs/PERSONAL_SITE_GUIDE.md" target="_blank" style="display: block; text-align: center; margin-top: 1rem; color: var(--accent);">
+        Read the full integration guide
+      </a>
+    </div>
+
+    <footer>
+      <p>
+        <a href="/docs">API Docs</a> |
+        <a href="https://github.com/anthropics/threadring-hub" target="_blank">GitHub</a>
+      </p>
+    </footer>
+  </div>
+
+  <script type="module">
+    // Import noble libraries from CDN
+    import * as ed from 'https://esm.sh/@noble/ed25519@2.1.0';
+    import { sha512 } from 'https://esm.sh/@noble/hashes@1.4.0/sha512';
+
+    // Configure sha512 for ed25519
+    ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
+
+    const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+    function base58Encode(buffer) {
+      let num = BigInt('0x' + Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(''));
+      let encoded = '';
+
+      while (num > 0n) {
+        const remainder = Number(num % 58n);
+        encoded = ALPHABET[remainder] + encoded;
+        num = num / 58n;
+      }
+
+      for (let i = 0; i < buffer.length && buffer[i] === 0; i++) {
+        encoded = '1' + encoded;
+      }
+
+      return encoded || '1';
+    }
+
+    function arrayToBase64(arr) {
+      return btoa(String.fromCharCode.apply(null, arr));
+    }
+
+    // Store generated data
+    let generatedData = null;
+
+    window.generate = async function() {
+      const domain = document.getElementById('domain').value.trim();
+      const name = document.getElementById('name').value.trim();
+      const avatar = document.getElementById('avatar').value.trim();
+      const profile = document.getElementById('profile').value.trim();
+
+      if (!domain) {
+        alert('Please enter your domain');
+        return;
+      }
+
+      // Disable button during generation
+      const btn = document.getElementById('generateBtn');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+
+      try {
+        // Generate keypair
+        const privateKeyBytes = ed.utils.randomPrivateKey();
+        const publicKeyBytes = await ed.getPublicKey(privateKeyBytes);
+
+        const privateKeyBase64 = arrayToBase64(privateKeyBytes);
+        const publicKeyBase64 = arrayToBase64(publicKeyBytes);
+
+        // Create multibase format
+        const multicodecPrefix = new Uint8Array([0xed, 0x01]);
+        const multicodecKey = new Uint8Array([...multicodecPrefix, ...publicKeyBytes]);
+        const publicKeyMultibase = 'z' + base58Encode(multicodecKey);
+
+        // Build DID
+        const did = `did:web:${domain}`;
+        const keyId = `${did}#key-1`;
+        const profileUrl = profile || `https://${domain}/`;
+
+        // Create DID document
+        const didDocument = {
+          '@context': [
+            'https://www.w3.org/ns/did/v1',
+            'https://w3id.org/security/suites/ed25519-2020/v1'
+          ],
+          id: did,
+          verificationMethod: [{
+            id: keyId,
+            type: 'Ed25519VerificationKey2020',
+            controller: did,
+            publicKeyBase64: publicKeyBase64
+          }],
+          authentication: [keyId],
+          assertionMethod: [keyId],
+          service: [{
+            id: `${did}#profile`,
+            type: 'Profile',
+            serviceEndpoint: profileUrl
+          }]
+        };
+
+        if (name) didDocument.name = name;
+        if (avatar) didDocument.image = avatar;
+
+        // Store data
+        generatedData = {
+          did,
+          keyId,
+          privateKeyBase64,
+          publicKeyBase64,
+          didDocument
+        };
+
+        // Update UI
+        document.getElementById('didDisplay').textContent = did;
+        document.getElementById('keyIdDisplay').textContent = keyId;
+        document.getElementById('privateKeyOutput').value = privateKeyBase64;
+        document.getElementById('didDocOutput').value = JSON.stringify(didDocument, null, 2);
+        document.getElementById('didUrl').textContent = `https://${domain}/.well-known/did.json`;
+        document.getElementById('verifyCmd').textContent = `curl https://${domain}/.well-known/did.json`;
+
+        // Show steps
+        document.getElementById('step2').classList.remove('hidden');
+        document.getElementById('step3').classList.remove('hidden');
+        document.getElementById('step4').classList.remove('hidden');
+
+        // Scroll to results
+        document.getElementById('step2').scrollIntoView({ behavior: 'smooth' });
+
+      } catch (error) {
+        alert('Error generating keys: ' + error.message);
+        console.error(error);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generate DID & Keys';
+      }
+    };
+
+    window.copyToClipboard = function(elementId) {
+      const textarea = document.getElementById(elementId);
+      textarea.select();
+      document.execCommand('copy');
+
+      const btn = textarea.parentElement.querySelector('.copy-btn');
+      const originalText = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = originalText, 2000);
+    };
+
+    window.downloadPrivateKey = function() {
+      if (!generatedData) return;
+
+      const content = `# PRIVATE KEY - KEEP THIS SECRET!
+# Never commit this file to version control.
+# Store securely as an environment variable.
+
+${generatedData.privateKeyBase64}
+`;
+      downloadFile('private-key.txt', content);
+    };
+
+    window.downloadDIDDoc = function() {
+      if (!generatedData) return;
+      downloadFile('did.json', JSON.stringify(generatedData.didDocument, null, 2));
+    };
+
+    function downloadFile(filename, content) {
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  </script>
+</body>
+</html>

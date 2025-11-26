@@ -5,6 +5,8 @@ import rateLimit from '@fastify/rate-limit';
 import sensible from '@fastify/sensible';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
+import fastifyStatic from '@fastify/static';
+import path from 'path';
 import { config } from './config';
 import { logger } from './utils/logger';
 import { connectDatabase, disconnectDatabase, checkDatabaseHealth } from './database/prisma';
@@ -29,7 +31,18 @@ async function buildApp() {
   // Register core plugins
   await fastify.register(sensible);
   await fastify.register(helmet, {
-    contentSecurityPolicy: false, // Will configure properly later
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://esm.sh"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'", "https://esm.sh"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: [],
+      },
+    },
   });
   await fastify.register(cors, {
     origin: config.cors.origins,
@@ -49,12 +62,23 @@ async function buildApp() {
         description: 'Decentralized community protocol for the open web',
         version: '0.1.0',
       },
-      servers: [
-        {
-          url: `http://${config.host}:${config.port}`,
-          description: 'Development server',
-        },
-      ],
+      servers: config.env === 'production'
+        ? [
+            {
+              url: config.hubUrl,
+              description: 'Production server',
+            },
+          ]
+        : [
+            {
+              url: `http://${config.host}:${config.port}`,
+              description: 'Development server',
+            },
+            {
+              url: config.hubUrl,
+              description: 'Production server',
+            },
+          ],
       tags: [
         { name: 'health', description: 'Health check endpoints' },
         { name: 'rings', description: 'Ring management operations' },
@@ -75,6 +99,22 @@ async function buildApp() {
       deepLinking: true,
     },
     staticCSP: true,
+  });
+
+  // Serve static files from public directory
+  await fastify.register(fastifyStatic, {
+    root: path.join(__dirname, '..', 'public'),
+    prefix: '/public/',
+  });
+
+  // DID Generator page
+  fastify.get('/generator', async (_request, reply) => {
+    return reply.sendFile('generator.html');
+  });
+
+  // Root redirect to docs
+  fastify.get('/', async (_request, reply) => {
+    return reply.redirect('/docs');
   });
 
   // Health check endpoints
