@@ -11,6 +11,7 @@ import { connectDatabase, disconnectDatabase, checkDatabaseHealth } from './data
 import { connectRedis, disconnectRedis, checkRedisHealth } from './database/redis';
 import { ringsRoutes } from './routes/rings';
 import { membershipRoutes } from './routes/membership';
+import { ringManagementRoutes } from './routes/ring-management';
 import { contentRoutes } from './routes/content';
 import { adminRoutes } from './routes/admin';
 import { profileUpdateRoutes } from './routes/profile-updates';
@@ -112,6 +113,7 @@ async function buildApp() {
   // Register API routes
   await fastify.register(ringsRoutes, { prefix: '/trp' });
   await fastify.register(membershipRoutes, { prefix: '/trp' });
+  await fastify.register(ringManagementRoutes, { prefix: '/trp' });
   await fastify.register(contentRoutes, { prefix: '/trp' });
   await fastify.register(profileUpdateRoutes, { prefix: '/trp' });
   await fastify.register(adminRoutes, { prefix: '/admin' });
