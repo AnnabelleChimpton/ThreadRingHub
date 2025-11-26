@@ -5,7 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import sensible from '@fastify/sensible';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
-import fastifyStatic from '@fastify/static';
+import fs from 'fs';
 import path from 'path';
 import { config } from './config';
 import { logger } from './utils/logger';
@@ -101,15 +101,25 @@ async function buildApp() {
     staticCSP: true,
   });
 
-  // Serve static files from public directory
-  await fastify.register(fastifyStatic, {
-    root: path.join(__dirname, '..', 'public'),
-    prefix: '/public/',
-  });
-
-  // DID Generator page
+  // DID Generator page - serve HTML directly
+  // Works in both dev (src/) and prod (dist/) by going up to project root
   fastify.get('/generator', async (_request, reply) => {
-    return reply.sendFile('generator.html');
+    // Try multiple possible locations
+    const possiblePaths = [
+      path.join(__dirname, '..', 'public', 'generator.html'),      // from src/
+      path.join(__dirname, '..', '..', 'public', 'generator.html'), // from dist/
+      path.join(process.cwd(), 'public', 'generator.html'),         // from project root
+      path.join(process.cwd(), 'apps', 'hub-api', 'public', 'generator.html'), // from monorepo root
+    ];
+
+    for (const htmlPath of possiblePaths) {
+      if (fs.existsSync(htmlPath)) {
+        const html = fs.readFileSync(htmlPath, 'utf-8');
+        return reply.type('text/html').send(html);
+      }
+    }
+
+    reply.code(404).send({ error: 'Generator page not found' });
   });
 
   // Root redirect to docs
