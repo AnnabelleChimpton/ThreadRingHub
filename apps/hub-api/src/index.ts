@@ -31,18 +31,7 @@ async function buildApp() {
   // Register core plugins
   await fastify.register(sensible);
   await fastify.register(helmet, {
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https://esm.sh"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'", "https://esm.sh"],
-        fontSrc: ["'self'"],
-        objectSrc: ["'none'"],
-        upgradeInsecureRequests: [],
-      },
-    },
+    contentSecurityPolicy: false, // Disable CSP - swagger-ui needs inline scripts
   });
   await fastify.register(cors, {
     origin: config.cors.origins,
@@ -98,7 +87,6 @@ async function buildApp() {
       docExpansion: 'list',
       deepLinking: true,
     },
-    staticCSP: true,
   });
 
   // DID Generator page - serve HTML directly
