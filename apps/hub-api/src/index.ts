@@ -35,7 +35,7 @@ async function buildApp() {
     credentials: true,
   });
   await fastify.register(rateLimit, {
-    max: 100,
+    max: 500, // Increased from 100 to accommodate authenticated API clients
     timeWindow: '1 minute',
   });
 
