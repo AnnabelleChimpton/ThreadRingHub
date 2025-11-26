@@ -78,6 +78,16 @@ async function buildApp() {
         { name: 'profile-updates', description: 'Federated profile update notifications' },
         { name: 'admin', description: 'Administrative operations' },
       ],
+      components: {
+        securitySchemes: {
+          httpSignature: {
+            type: 'apiKey',
+            in: 'header',
+            name: 'Signature',
+            description: 'HTTP Signature authentication using Ed25519. Format: keyId="did:web:...",algorithm="ed25519",headers="(request-target) host date digest",signature="..."',
+          },
+        },
+      },
     },
   });
 
