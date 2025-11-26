@@ -1,5 +1,4 @@
 import { prisma } from '../database/prisma';
-import { Prisma } from '@prisma/client';
 import { logger } from '../utils/logger';
 
 export interface RateLimitConfig {
@@ -31,9 +30,6 @@ export class RateLimitingService {
     VETERAN: { hourly: 2, daily: 5, weekly: 25 },  // Capped at 2/hour for burst protection
     TRUSTED: { hourly: 2, daily: 10, weekly: 50 }  // Capped at 2/hour for burst protection
   };
-
-  // Absolute maximum burst limit (applies to all users)
-  private static readonly MAX_FORKS_PER_HOUR = 2;
 
   /**
    * Check if actor can perform fork action with additional safeguards
@@ -89,7 +85,7 @@ export class RateLimitingService {
 
     const tier = await this.getUserTier(actorDid);
     const limits = this.FORK_LIMITS[tier];
-    
+
     const now = new Date();
     const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
     const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -102,9 +98,9 @@ export class RateLimitingService {
       this.getActionCount(actorDid, 'fork_ring', weekAgo)
     ]);
 
-    const allowed = 
-      hourlyCount < limits.hourly && 
-      dailyCount < limits.daily && 
+    const allowed =
+      hourlyCount < limits.hourly &&
+      dailyCount < limits.daily &&
       weeklyCount < limits.weekly;
 
     return {
@@ -149,7 +145,7 @@ export class RateLimitingService {
       where: { did: actorDid },
       select: { isAdmin: true }
     });
-    
+
     return actor?.isAdmin || false;
   }
 
@@ -169,10 +165,10 @@ export class RateLimitingService {
     // Calculate fresh tier
     const actor = await prisma.actor.findUnique({
       where: { did: actorDid },
-      select: { 
-        discoveredAt: true, 
-        trusted: true, 
-        verified: true 
+      select: {
+        discoveredAt: true,
+        trusted: true,
+        verified: true
       }
     });
 
@@ -187,7 +183,7 @@ export class RateLimitingService {
     if (actor.trusted || (actor.verified && daysSinceCreated > 90)) {
       tier = 'TRUSTED';
     } else if (daysSinceCreated >= 30) {
-      tier = 'VETERAN';  
+      tier = 'VETERAN';
     } else if (daysSinceCreated >= 7) {
       tier = 'ESTABLISHED';
     } else {
@@ -204,8 +200,8 @@ export class RateLimitingService {
    * Get count of actions within time window
    */
   private static async getActionCount(
-    actorDid: string, 
-    action: string, 
+    actorDid: string,
+    action: string,
     since: Date
   ): Promise<number> {
     return await prisma.rateLimit.count({
@@ -233,30 +229,26 @@ export class RateLimitingService {
       // Calculate activity metrics
       const [ringsCreated, membershipCount, totalPosts] = await Promise.all([
         prisma.ring.count({ where: { ownerDid: actorDid } }),
-        prisma.membership.count({ 
-          where: { actorDid, status: 'ACTIVE' } 
+        prisma.membership.count({
+          where: { actorDid, status: 'ACTIVE' }
         }),
-        prisma.postRef.count({ 
-          where: { actorDid, status: 'ACCEPTED' } 
+        prisma.postRef.count({
+          where: { actorDid, status: 'ACCEPTED' }
         })
       ]);
 
       const activeRings = await prisma.ring.count({
         where: {
           ownerDid: actorDid,
-          postRefs: {
-            some: {
-              status: 'ACCEPTED'
-            }
-          }
         }
       });
 
       // Simple reputation score calculation
-      const reputationScore = 
-        (activeRings * 10) + 
-        (totalPosts * 2) + 
-        (membershipCount * 1);
+      const reputationScore =
+        (ringsCreated * 10) +
+        (activeRings * 20) +
+        (totalPosts * 1) +
+        (membershipCount * 5);
 
       await prisma.actorReputation.upsert({
         where: { actorDid },
@@ -302,16 +294,14 @@ export class RateLimitingService {
 
     // Count non-notification posts
     // Use raw query due to Prisma NULL handling issues with JSON path queries
-    const realPostCountResult = await prisma.$queryRaw<[{count: bigint}]>`
+    const realPostCountResult = await prisma.$queryRaw<[{ count: bigint }]>`
       SELECT COUNT(*) as count
-      FROM "PostRef" 
+      FROM "PostRef"
       WHERE "ringId" = ${recentRing.id}
-        AND status = 'ACCEPTED' 
-        AND (
-          metadata IS NULL 
-          OR metadata->>'type' IS NULL 
-          OR metadata->>'type' != 'fork_notification'
-        )
+      AND (
+        metadata->>'type' IS NULL 
+        OR metadata->>'type' != 'fork_notification'
+      )
     `;
     const realPostCount = Number(realPostCountResult[0].count);
 
@@ -326,9 +316,9 @@ export class RateLimitingService {
       return { passed: true };
     }
 
-    return { 
-      passed: false, 
-      reason: 'Must have at least 1 post in your most recent ring before creating another' 
+    return {
+      passed: false,
+      reason: 'Must have at least 1 post in your most recent ring before creating another'
     };
   }
 
@@ -346,7 +336,7 @@ export class RateLimitingService {
     ]);
 
     // Flag thresholds
-    const shouldFlag = 
+    const shouldFlag =
       weeklyCount >= 20 ||  // 20+ forks in a week
       monthlyCount >= 50;   // 50+ forks in a month
 
@@ -361,10 +351,10 @@ export class RateLimitingService {
         }
       });
 
-      logger.warn({ 
-        actorDid, 
-        weeklyCount, 
-        monthlyCount 
+      logger.warn({
+        actorDid,
+        weeklyCount,
+        monthlyCount
       }, 'User flagged for human review due to high fork volume');
     }
   }
@@ -394,6 +384,23 @@ export class RateLimitingService {
     });
 
     logger.warn({ actorDid, cooldownUntil }, 'Applied rate limit cooldown');
+
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    await prisma.rateLimit.deleteMany({
+      where: {
+        performedAt: { lt: weekAgo }
+      }
+    });
+  }
+
+  /**
+   * Get users flagged for review
+   */
+  static async getFlaggedUsers(): Promise<any[]> {
+    return await prisma.actorReputation.findMany({
+      where: { flaggedForReview: true },
+      orderBy: { lastCalculatedAt: 'desc' }
+    });
   }
 
   /**
@@ -412,24 +419,10 @@ export class RateLimitingService {
   }
 
   /**
-   * Get users flagged for review
-   */
-  static async getFlaggedUsers(): Promise<any[]> {
-    return await prisma.actorReputation.findMany({
-      where: { flaggedForReview: true },
-      include: {
-        // Get actor name if available
-      },
-      orderBy: { lastCalculatedAt: 'desc' }
-    });
-  }
-
-  /**
-   * Clean up old rate limit records (run periodically)
+   * Clean up old rate limit records
    */
   static async cleanupOldRecords(): Promise<void> {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    
     await prisma.rateLimit.deleteMany({
       where: {
         performedAt: { lt: weekAgo }

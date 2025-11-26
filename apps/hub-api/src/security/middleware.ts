@@ -26,19 +26,19 @@ export async function authenticateActor(
 ): Promise<void> {
   try {
     logger.info({ method: request.method, url: request.url }, 'Authentication middleware called');
-    
+
     const isPublic = isPublicEndpoint(request.url, request.method);
-    
+
     // Verify HTTP signature (but don't require it for public endpoints)
     const result = await verifyHttpSignature(request);
-    
-    logger.info({ 
-      valid: result.valid, 
-      actorDid: result.actorDid, 
+
+    logger.info({
+      valid: result.valid,
+      actorDid: result.actorDid,
       error: result.error,
-      isPublic 
+      isPublic
     }, 'HTTP signature verification result in middleware');
-    
+
     if (!result.valid) {
       // For public endpoints, authentication failure is allowed - just skip setting actor
       if (isPublic) {
@@ -48,24 +48,24 @@ export async function authenticateActor(
       // Check if this is an admin account that should bypass signature verification
       if (result.actorDid) {
         logger.info({ actorDid: result.actorDid }, 'Signature verification failed, checking admin status');
-        
+
         const actor = await prisma.actor.findUnique({
           where: { did: result.actorDid },
           select: { isAdmin: true, verified: true, trusted: true, name: true }
         });
-        
+
         if (actor?.isAdmin) {
           logger.info({ actorDid: result.actorDid }, 'Admin bypass: allowing request despite signature verification failure');
-          
+
           // Create a successful result for admin bypass
           result.valid = true;
           result.publicKey = result.publicKey || 'admin-bypass';
-          
+
           // Continue with admin actor setup below
         } else {
-          logger.warn({ 
-            error: result.error, 
-            method: request.method, 
+          logger.warn({
+            error: result.error,
+            method: request.method,
             url: request.url,
             actorDid: result.actorDid,
             isAdmin: actor?.isAdmin || false
@@ -77,10 +77,10 @@ export async function authenticateActor(
           return;
         }
       } else {
-        logger.warn({ 
-          error: result.error, 
-          method: request.method, 
-          url: request.url 
+        logger.warn({
+          error: result.error,
+          method: request.method,
+          url: request.url
         }, 'Authentication failed in middleware - no actor DID');
         reply.code(401).send({
           error: 'Authentication required',
@@ -94,31 +94,31 @@ export async function authenticateActor(
     if (result.actorDid) {
       logger.info({ actorDid: result.actorDid }, 'Looking up actor information');
       let actor = await getActor(result.actorDid);
-      
-      logger.info({ 
-        actorDid: result.actorDid, 
+
+      logger.info({
+        actorDid: result.actorDid,
         existingActor: !!actor,
         verified: actor?.verified,
-        trusted: actor?.trusted 
+        trusted: actor?.trusted
       }, 'Actor lookup result');
-      
+
       // If actor doesn't exist, register them
       if (!actor) {
         logger.info({ did: result.actorDid }, 'Registering new actor during authentication');
-        
+
         actor = await registerActor({
           did: result.actorDid,
           type: 'USER', // Default to USER type, can be updated later if needed
           publicKey: result.publicKey, // From HTTP signature verification
         });
-        
-        logger.info({ 
-          did: result.actorDid, 
+
+        logger.info({
+          did: result.actorDid,
           registered: !!actor,
-          verified: actor?.verified 
+          verified: actor?.verified
         }, 'Actor registration result');
       }
-      
+
       if (actor) {
         request.actor = {
           did: actor.did,
@@ -127,11 +127,11 @@ export async function authenticateActor(
           trusted: actor.trusted,
         };
         request.keyId = result.keyId;
-        
-        logger.info({ 
-          actorDid: actor.did, 
-          verified: actor.verified, 
-          trusted: actor.trusted 
+
+        logger.info({
+          actorDid: actor.did,
+          verified: actor.verified,
+          trusted: actor.trusted
         }, 'Actor attached to request');
       } else {
         // Registration failed, but HTTP signature was valid
@@ -166,27 +166,27 @@ export async function requireVerifiedActor(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
-  logger.info({ 
+  logger.info({
     hasActor: !!request.actor,
     actorDid: request.actor?.did,
     verified: request.actor?.verified,
-    trusted: request.actor?.trusted 
+    trusted: request.actor?.trusted
   }, 'Checking actor verification requirement');
-  
+
   if (!request.actor?.verified) {
-    logger.warn({ 
+    logger.warn({
       actorDid: request.actor?.did,
       verified: request.actor?.verified,
-      hasActor: !!request.actor 
+      hasActor: !!request.actor
     }, 'Actor verification requirement failed');
-    
+
     reply.code(403).send({
       error: 'Verification required',
       message: 'This action requires a verified actor',
     });
     return;
   }
-  
+
   logger.info({ actorDid: request.actor.did }, 'Actor verification requirement passed');
 }
 
@@ -221,7 +221,7 @@ export function requireNotBlocked(ringParam: string = 'slug') {
       // For endpoints like /join where ring slug is in body
       ringSlug = (request.body as any).ringSlug || (request.body as any)[ringParam];
     }
-    
+
     if (!ringSlug) {
       reply.code(400).send({
         error: 'Invalid request',
@@ -327,7 +327,7 @@ export function requireMembership(ringParam: string = 'slug') {
 export function requirePermission(permission: string) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const membership = (request as any).membership;
-    
+
     if (!membership) {
       reply.code(403).send({
         error: 'Access denied',
@@ -371,11 +371,11 @@ function isPublicEndpoint(url: string, method?: string): boolean {
       '/trp/rings/trending',
       '/trp/stats',
     ];
-    
+
     if (getPublicPaths.some(path => url === path || url.startsWith(path + '?'))) {
       return true;
     }
-    
+
     // Individual ring info is public for GET requests
     if (url.match(/^\/trp\/rings\/[^\/]+$/)) {
       return true; // GET /trp/rings/{slug} is public
@@ -389,8 +389,8 @@ function isPublicEndpoint(url: string, method?: string): boolean {
  * Rate limiting by actor DID
  */
 export async function actorRateLimit(
-  request: FastifyRequest,
-  reply: FastifyReply
+  _request: FastifyRequest,
+  _reply: FastifyReply
 ): Promise<void> {
   // This would integrate with Redis to track per-actor rate limits
   // For now, we'll rely on the global rate limiting configured in the main app
@@ -409,7 +409,7 @@ export async function auditLogger(
   }
 
   const originalSend = reply.send.bind(reply);
-  reply.send = function(payload: any) {
+  reply.send = function (payload: any) {
     // Log the action after response
     setImmediate(() => {
       logger.info({

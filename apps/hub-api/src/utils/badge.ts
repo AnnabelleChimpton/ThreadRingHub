@@ -1,12 +1,7 @@
-import crypto from 'crypto';
 import { nanoid } from 'nanoid';
-import { BadgeInput } from '../schemas/ring-schemas';
+import crypto from 'crypto';
 import { logger } from './logger';
 
-/**
- * Badge JSON-LD schema for ThreadRing membership badges
- * Based on Open Badges 3.0 specification with ThreadRing extensions
- */
 export interface ThreadRingBadge {
   '@context': string[];
   id: string;
@@ -15,10 +10,10 @@ export interface ThreadRingBadge {
     id: string;
     type: string;
     name: string;
-    url?: string;
+    url: string;
   };
   credentialSubject: {
-    id: string; // DID of the badge holder
+    id: string;
     type: string[];
     achievement: {
       id: string;
@@ -59,7 +54,6 @@ export async function generateBadge(
   ringSlug: string,
   ringName: string,
   actorDid: string,
-  actorName: string,
   role: string,
   privateKey: crypto.KeyObject,
   ringHubUrl: string,
@@ -112,7 +106,7 @@ export async function generateBadge(
 
   // Generate proof (JWS signature)
   const proof = await generateBadgeProof(badge, privateKey, issuerDid);
-  
+
   return {
     ...badge,
     proof
@@ -177,7 +171,7 @@ export async function verifyBadge(
     const signature = Buffer.from(signatureB64, 'base64url');
 
     const isValid = crypto.verify(null, Buffer.from(signingInput), publicKey, signature);
-    
+
     if (!isValid) {
       return { isValid: false, error: 'Invalid signature' };
     }
@@ -222,7 +216,7 @@ export async function revokeBadge(
 /**
  * Check if a badge is revoked
  */
-export async function isBadgeRevoked(badgeId: string): Promise<boolean> {
+export async function isBadgeRevoked(_badgeId: string): Promise<boolean> {
   // In production, this would check against the revocation list
   // For now, return false (not revoked)
   return false;

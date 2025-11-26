@@ -14,6 +14,7 @@ import { membershipRoutes } from './routes/membership';
 import { contentRoutes } from './routes/content';
 import { adminRoutes } from './routes/admin';
 import { profileUpdateRoutes } from './routes/profile-updates';
+import { resignBadges } from './utils/migration';
 
 async function buildApp() {
   const fastify = Fastify({
@@ -84,7 +85,7 @@ async function buildApp() {
     return { status: 'live', timestamp: new Date().toISOString() };
   });
 
-  fastify.get('/health/ready', async (request, reply) => {
+  fastify.get('/health/ready', async (_request, reply) => {
     const [dbHealthy, redisHealthy] = await Promise.all([
       checkDatabaseHealth(),
       checkRedisHealth(),
@@ -115,34 +116,42 @@ async function buildApp() {
   await fastify.register(profileUpdateRoutes, { prefix: '/trp' });
   await fastify.register(adminRoutes, { prefix: '/admin' });
 
-  // Graceful shutdown
-  const closeGracefully = async (signal: string) => {
-    fastify.log.info(`Received signal: ${signal}, closing gracefully...`);
-    await fastify.close();
-    await disconnectDatabase();
-    await disconnectRedis();
-    process.exit(0);
-  };
-
-  process.on('SIGINT', () => closeGracefully('SIGINT'));
-  process.on('SIGTERM', () => closeGracefully('SIGTERM'));
-
   return fastify;
 }
 
 async function start() {
   try {
+    const fastify = await buildApp();
+
     // Connect to databases
     await connectDatabase();
     await connectRedis();
 
-    const fastify = await buildApp();
-    const port = config.port;
-    const host = config.host;
+    // Run badge re-signing migration on startup
+    try {
+      await resignBadges();
+    } catch (error) {
+      logger.error({ error }, 'Failed to resign badges');
+    }
 
-    await fastify.listen({ port, host });
-    fastify.log.info(`Ring Hub API running at http://${host}:${port}`);
+    // Start server
+    const { host, port } = config;
+    await fastify.listen({ host, port });
+
     fastify.log.info(`API Documentation available at http://${host}:${port}/docs`);
+
+    // Graceful shutdown
+    const closeGracefully = async (signal: string) => {
+      fastify.log.info(`Received signal: ${signal}, closing gracefully...`);
+      await fastify.close();
+      await disconnectDatabase();
+      await disconnectRedis();
+      process.exit(0);
+    };
+
+    process.on('SIGINT', () => closeGracefully('SIGINT'));
+    process.on('SIGTERM', () => closeGracefully('SIGTERM'));
+
   } catch (err) {
     logger.error(err);
     process.exit(1);

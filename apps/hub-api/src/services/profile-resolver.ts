@@ -234,6 +234,7 @@ export async function resolveActorProfile(
             actorName: metadata.actorName || actor.name || null,
             avatarUrl: metadata.avatarUrl || null,
             profileUrl: metadata.profileUrl,
+            handle: metadata.handle || null,
             instanceDomain: metadata.instanceDomain || null,
           };
         }

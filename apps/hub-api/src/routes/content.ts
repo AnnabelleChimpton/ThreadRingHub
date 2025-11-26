@@ -1,31 +1,17 @@
-import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { FastifyInstance } from 'fastify';
 import { prisma } from '../database/prisma';
 import { logger } from '../utils/logger';
-import { 
-  authenticateActor, 
-  requireVerifiedActor, 
-  requireNotBlocked,
-  requireMembership,
-  requirePermission,
-  auditLogger 
-} from '../security/middleware';
+import { authenticateActor, requireVerifiedActor, requireNotBlocked, requireMembership, requirePermission, auditLogger } from '../security/middleware';
 import {
-  SubmitPostSchema,
-  CuratePostSchema,
-  PostQuerySchema,
-  AuditQuerySchema,
-  type SubmitPostInput,
-  type CuratePostInput,
-  type PostQueryInput,
-  type AuditQueryInput,
-  type PostResponse,
-  type PostsListResponse,
-  type AuditListResponse,
+  SubmitPostInput,
+  CuratePostInput,
+  PostQueryInput,
+  AuditQueryInput,
+  PostResponse,
+  PostsListResponse,
+  AuditListResponse
 } from '../schemas/ring-schemas';
 
-/**
- * Build post response from database record
- */
 function buildPostResponse(postRef: any): PostResponse {
   return {
     id: postRef.id,
@@ -61,16 +47,16 @@ export async function contentRoutes(fastify: FastifyInstance) {
           uri: { type: 'string', format: 'uri' },
           digest: { type: 'string' },
           actorDid: { type: 'string' },
-          metadata: { 
+          metadata: {
             type: 'object',
             properties: {
               title: { type: 'string', maxLength: 200 },
               textPreview: { type: 'string', maxLength: 300 },
               excerpt: { type: 'string', maxLength: 500 },
-              tags: { 
-                type: 'array', 
+              tags: {
+                type: 'array',
                 items: { type: 'string' },
-                maxItems: 10 
+                maxItems: 10
               },
               publishedAt: { type: 'string', format: 'date-time' },
               platform: { type: 'string' },
@@ -134,7 +120,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
 
       // Check post policy
       let requiresApproval = false;
-      
+
       switch (ring.postPolicy) {
         case 'CLOSED':
           reply.code(403).send({
@@ -230,7 +216,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
 
       reply.code(201).send({
         post: buildPostResponse(postRef),
-        message: requiresApproval 
+        message: requiresApproval
           ? 'Content submitted for moderation'
           : 'Content accepted',
         requiresApproval,
@@ -247,9 +233,9 @@ export async function contentRoutes(fastify: FastifyInstance) {
   /**
    * GET /trp/rings/:slug/feed - Get ring feed
    */
-  fastify.get<{ 
-    Params: { slug: string }; 
-    Querystring: PostQueryInput 
+  fastify.get<{
+    Params: { slug: string };
+    Querystring: PostQueryInput
   }>('/rings/:slug/feed', {
     schema: {
       params: {
@@ -380,9 +366,9 @@ export async function contentRoutes(fastify: FastifyInstance) {
 
         ringIds = familyIds;
       }
-      
+
       // Build query filters
-      const where: any = { 
+      const where: any = {
         ringId: ringIds.length === 1 ? ringIds[0] : { in: ringIds }
       };
 
@@ -394,7 +380,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
         // For scope other than 'ring', check membership of the requested ring
         // For 'ring' scope, check membership of the specific ring
         let membershipCheckRingId = ring.id;
-        
+
         const membership = await prisma.membership.findFirst({
           where: {
             ringId: membershipCheckRingId,
@@ -402,7 +388,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
             status: 'ACTIVE',
           },
         });
-        
+
         if (membership) {
           // Members can see all posts for moderation, unless status filter specified
           if (status) where.status = status;
@@ -467,9 +453,9 @@ export async function contentRoutes(fastify: FastifyInstance) {
   /**
    * GET /trp/rings/:slug/queue - Get moderation queue
    */
-  fastify.get<{ 
-    Params: { slug: string }; 
-    Querystring: PostQueryInput 
+  fastify.get<{
+    Params: { slug: string };
+    Querystring: PostQueryInput
   }>('/rings/:slug/queue', {
     preHandler: [
       authenticateActor,
@@ -559,8 +545,8 @@ export async function contentRoutes(fastify: FastifyInstance) {
    * POST /trp/curate - Moderate/curate content
    * Allows both moderators and post authors to manage content
    */
-  fastify.post<{ 
-    Body: CuratePostInput & { postId: string } 
+  fastify.post<{
+    Body: CuratePostInput & { postId: string }
   }>('/curate', {
     preHandler: [
       authenticateActor,
@@ -605,58 +591,17 @@ export async function contentRoutes(fastify: FastifyInstance) {
 
       // Check permissions
       const isAuthor = postRef.actorDid === actorDid || postRef.submittedBy === actorDid;
-      
-      // Authors can only remove their own posts
-      if (isAuthor && action === 'remove') {
-        // Author is allowed to remove their own content
-        logger.info({
-          postId,
-          actorDid,
-          action: 'author_remove',
-        }, 'Author removing their own post');
-      } else if (!isAuthor) {
-        // Not the author, check if they have moderation permissions
-        const membership = await prisma.membership.findFirst({
-          where: {
-            ringId: postRef.ring.id,
-            actorDid: actorDid,
-            status: 'ACTIVE',
-          },
-          include: {
-            role: {
-              select: { permissions: true },
-            },
-          },
-        });
 
-        if (!membership) {
+      if (isAuthor) {
+        if (action !== 'remove') {
           reply.code(403).send({
             error: 'Forbidden',
-            message: 'You must be a member of this ring to moderate content',
+            message: 'Authors can only remove their own posts. Other actions require moderation permissions.',
           });
           return;
         }
 
-        // Check if member has moderate_posts permission
-        const permissions = (membership.role?.permissions as string[]) || [];
-        if (!permissions.includes('moderate_posts')) {
-          reply.code(403).send({
-            error: 'Forbidden',
-            message: 'You do not have permission to moderate content in this ring',
-          });
-          return;
-        }
-      } else {
-        // Author trying to do something other than remove
-        reply.code(403).send({
-          error: 'Forbidden',
-          message: 'Authors can only remove their own posts. Other actions require moderation permissions.',
-        });
-        return;
-      }
-
-      // Handle author removal differently - removes from ALL rings
-      if (isAuthor && action === 'remove') {
+        // Author removal - removes from ALL rings
         // Find all instances of this content across all rings
         const allPostRefs = await prisma.postRef.findMany({
           where: {
@@ -669,7 +614,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
         });
 
         // Update all instances
-        const updatedPosts = await prisma.postRef.updateMany({
+        await prisma.postRef.updateMany({
           where: {
             uri: postRef.uri,
             actorDid: postRef.actorDid,
@@ -710,7 +655,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
           totalRemoved: allPostRefs.length,
         }, 'Author removed content from all rings');
 
-        // Return the updated post info
+        // Return the updated post info (just the one requested)
         const updatedPost = await prisma.postRef.findUnique({
           where: { id: postId },
           include: {
@@ -726,11 +671,43 @@ export async function contentRoutes(fastify: FastifyInstance) {
           reason: reason || 'Removed by author from all rings',
           isAuthorAction: true,
           globalRemoval: true,
-          affectedRings: allPostRefs.map(r => ({ 
-            id: r.ring.id, 
-            slug: r.ring.slug 
+          affectedRings: allPostRefs.map(r => ({
+            id: r.ring.id,
+            slug: r.ring.slug
           })),
           totalRemoved: allPostRefs.length,
+        });
+        return;
+      }
+
+      // Not author - check moderation permissions
+      const membership = await prisma.membership.findFirst({
+        where: {
+          ringId: postRef.ring.id,
+          actorDid: actorDid,
+          status: 'ACTIVE',
+        },
+        include: {
+          role: {
+            select: { permissions: true },
+          },
+        },
+      });
+
+      if (!membership) {
+        reply.code(403).send({
+          error: 'Forbidden',
+          message: 'You must be a member of this ring to moderate content',
+        });
+        return;
+      }
+
+      // Check if member has moderate_posts permission
+      const permissions = (membership.role?.permissions as string[]) || [];
+      if (!permissions.includes('moderate_posts')) {
+        reply.code(403).send({
+          error: 'Forbidden',
+          message: 'You do not have permission to moderate content in this ring',
         });
         return;
       }
@@ -822,9 +799,9 @@ export async function contentRoutes(fastify: FastifyInstance) {
   /**
    * GET /trp/rings/:slug/audit - Get audit log
    */
-  fastify.get<{ 
-    Params: { slug: string }; 
-    Querystring: AuditQueryInput 
+  fastify.get<{
+    Params: { slug: string };
+    Querystring: AuditQueryInput
   }>('/rings/:slug/audit', {
     preHandler: [
       authenticateActor,
@@ -907,16 +884,16 @@ export async function contentRoutes(fastify: FastifyInstance) {
       const response: AuditListResponse = {
         entries: entries.map(entry => ({
           id: entry.id,
-          action: entry.action,
+          metadata: entry.metadata as any,
           actorDid: entry.actorDid,
-          targetDid: entry.targetDid,
-          timestamp: entry.timestamp.toISOString(),
-          metadata: entry.metadata,
+          action: entry.action,
+          targetDid: entry.targetDid || undefined,
+          timestamp: entry.timestamp.toISOString()
         })),
-        total,
         limit,
         offset,
-        hasMore: offset + limit < total,
+        total,
+        hasMore: total > offset + limit
       };
 
       reply.send(response);

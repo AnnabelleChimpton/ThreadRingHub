@@ -1,5 +1,5 @@
-import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { nanoid } from 'nanoid';
+import { FastifyInstance } from 'fastify';
+import { config } from '../config';
 import { prisma } from '../database/prisma';
 import { logger } from '../utils/logger';
 import {
@@ -12,8 +12,6 @@ import {
 } from '../security/middleware';
 import { registerActor } from '../security/actor-manager';
 import {
-  JoinRingSchema,
-  UpdateMemberRoleSchema,
   type JoinRingInput,
   type UpdateMemberRoleInput,
 } from '../schemas/ring-schemas';
@@ -22,13 +20,24 @@ import { resolveActorProfile, validateProfileServiceEndpoint } from '../services
 import { resolveDID } from '../security/did-resolver';
 import crypto from 'crypto';
 
-// TODO: In production, load this from environment or key management service
-const RING_HUB_PRIVATE_KEY = crypto.generateKeyPairSync('ed25519', {
-  publicKeyEncoding: { type: 'spki', format: 'pem' },
-  privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-}).privateKey;
+// Load persistent private key from config or generate a temporary one (with warning)
+let RING_HUB_PRIVATE_KEY: crypto.KeyObject;
 
-const RING_HUB_URL = process.env.RING_HUB_URL || 'https://ringhub.example.com';
+if (config.security.privateKey) {
+  try {
+    const privateKeyBuffer = Buffer.from(config.security.privateKey, 'base64');
+    RING_HUB_PRIVATE_KEY = crypto.createPrivateKey(privateKeyBuffer);
+    logger.info('Loaded persistent RING_HUB_PRIVATE_KEY from configuration');
+  } catch (error) {
+    logger.error({ error }, 'Failed to load configured RING_HUB_PRIVATE_KEY, falling back to ephemeral key');
+    RING_HUB_PRIVATE_KEY = crypto.generateKeyPairSync('ed25519').privateKey;
+  }
+} else {
+  logger.warn('No RING_HUB_PRIVATE_KEY configured! Using ephemeral key. Badges will be invalid after restart.');
+  RING_HUB_PRIVATE_KEY = crypto.generateKeyPairSync('ed25519').privateKey;
+}
+
+const RING_HUB_URL = config.hubUrl;
 
 export async function membershipRoutes(fastify: FastifyInstance) {
   // Add security middleware to all routes
@@ -133,10 +142,9 @@ export async function membershipRoutes(fastify: FastifyInstance) {
       }
 
       // Ensure actor is registered in the Actor table
-      // This handles the case where middleware auto-registration failed
       await registerActor({
         did: actorDid,
-        name: actorProfile?.name,
+        name: actorProfile?.actorName || undefined,
         type: 'USER',
         instanceUrl: actorProfile?.instanceDomain,
       });
@@ -153,7 +161,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
           membershipStatus = 'PENDING';
           requiresApproval = true;
           break;
-        case 'INVITATION':
+        case 'INVITATION': {
           // Check if there's a pending invitation
           const invitation = await prisma.invitation.findFirst({
             where: {
@@ -179,6 +187,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
             data: { status: 'ACCEPTED' },
           });
           break;
+        }
         case 'CLOSED':
           reply.code(403).send({
             error: 'Ring closed',
@@ -192,7 +201,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
       if (!memberRole && ring.roles.length > 0) {
         memberRole = ring.roles[0]; // Use first available role as fallback
       }
-      
+
       if (!memberRole) {
         reply.code(500).send({
           error: 'Configuration error',
@@ -223,9 +232,9 @@ export async function membershipRoutes(fastify: FastifyInstance) {
         update: {
           status: membershipStatus as any,
           roleId: memberRole.id,
-          joinedAt: membershipStatus === 'ACTIVE' ? new Date() : undefined,
-          applicationMessage: message,
-          metadata,
+          joinedAt: membershipStatus === 'ACTIVE' ? new Date() : null,
+          applicationMessage: (message || null) as any,
+          metadata: (metadata || {}) as any,
           ...profileData,
         },
         create: {
@@ -233,7 +242,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
           actorDid,
           roleId: memberRole.id,
           status: membershipStatus as any,
-          joinedAt: membershipStatus === 'ACTIVE' ? new Date() : undefined,
+          joinedAt: membershipStatus === 'ACTIVE' ? new Date() : null,
           applicationMessage: message,
           metadata,
           ...profileData,
@@ -244,16 +253,10 @@ export async function membershipRoutes(fastify: FastifyInstance) {
       let badge = null;
       if (membershipStatus === 'ACTIVE') {
         try {
-          const actor = await prisma.actor.findUnique({
-            where: { did: actorDid },
-            select: { name: true },
-          });
-
           badge = await generateBadge(
             ring.slug,
             ring.name,
             actorDid,
-            actor?.name || 'Unknown',
             memberRole.name,
             RING_HUB_PRIVATE_KEY,
             RING_HUB_URL,
@@ -272,7 +275,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
             data: {
               id: badge.id,
               membershipId: membership.id,
-              badgeData: badge,
+              badgeData: badge as any,
               issuedAt: new Date(),
             },
           });
@@ -315,7 +318,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
           id: badge.id,
           url: `${RING_HUB_URL}/badges/${badge.id}`,
         } : null,
-        message: requiresApproval 
+        message: requiresApproval
           ? 'Application submitted for review'
           : 'Successfully joined ring',
       });
@@ -408,11 +411,11 @@ export async function membershipRoutes(fastify: FastifyInstance) {
       if (membership.badgeId) {
         try {
           await revokeBadge(membership.badgeId, reason || 'Member left ring', actorDid);
-          
+
           // Update badge status in database
           await prisma.badge.updateMany({
             where: { id: membership.badgeId },
-            data: { 
+            data: {
               revokedAt: new Date(),
               revocationReason: reason || 'Member left ring',
             },
@@ -429,7 +432,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
         data: {
           status: 'REVOKED',
           leftAt: new Date(),
-          leaveReason: reason,
+          leaveReason: reason || null,
         },
       });
 
@@ -469,9 +472,9 @@ export async function membershipRoutes(fastify: FastifyInstance) {
   /**
    * PUT /trp/rings/:slug/members/:did - Update member role
    */
-  fastify.put<{ 
-    Params: { slug: string; did: string }; 
-    Body: UpdateMemberRoleInput 
+  fastify.put<{
+    Params: { slug: string; did: string };
+    Body: UpdateMemberRoleInput
   }>('/rings/:slug/members/:did', {
     preHandler: [
       authenticateActor,
@@ -571,7 +574,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
         where: { id: membership.id },
         data: {
           roleId: newRole.id,
-          metadata: metadata ? { ...membership.metadata, ...metadata } : membership.metadata,
+          metadata: metadata ? { ...(membership.metadata as any), ...metadata } : membership.metadata,
         },
       });
 
@@ -732,8 +735,9 @@ export async function membershipRoutes(fastify: FastifyInstance) {
         isValid: verification.isValid,
         error: verification.error,
         verifiedAt: new Date().toISOString(),
-        issuer: badge.badgeData?.issuer?.id,
+        issuer: (badge.badgeData as any)?.issuer?.id,
       });
+
     } catch (error) {
       logger.error({ error }, 'Failed to verify badge');
       reply.code(500).send({
@@ -748,9 +752,9 @@ export async function membershipRoutes(fastify: FastifyInstance) {
    * Returns all active badges associated with the actor's DID
    * This is a public endpoint - no authentication required
    */
-  fastify.get<{ 
+  fastify.get<{
     Params: { did: string };
-    Querystring: { 
+    Querystring: {
       status?: 'active' | 'revoked' | 'all';
       limit?: number;
       offset?: number;
@@ -767,21 +771,21 @@ export async function membershipRoutes(fastify: FastifyInstance) {
       querystring: {
         type: 'object',
         properties: {
-          status: { 
-            type: 'string', 
+          status: {
+            type: 'string',
             enum: ['active', 'revoked', 'all'],
             default: 'active'
           },
-          limit: { 
-            type: 'number', 
-            minimum: 1, 
-            maximum: 100, 
-            default: 20 
+          limit: {
+            type: 'number',
+            minimum: 1,
+            maximum: 100,
+            default: 20
           },
-          offset: { 
-            type: 'number', 
-            minimum: 0, 
-            default: 0 
+          offset: {
+            type: 'number',
+            minimum: 0,
+            default: 0
           },
         },
       },
@@ -854,7 +858,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
       }
 
       // Get badges with their associated membership and ring data
-      const [badges, totalCount] = await Promise.all([
+      const [badges] = await Promise.all([
         prisma.badge.findMany({
           where: {
             ...badgeWhere,
@@ -928,9 +932,9 @@ export async function membershipRoutes(fastify: FastifyInstance) {
         hasMore: offset + limit < accessibleBadges.length,
       });
     } catch (error) {
-      logger.error({ 
+      logger.error({
         error: error instanceof Error ? error.message : String(error),
-        did 
+        did
       }, 'Failed to get actor badges');
       reply.code(500).send({
         error: 'Internal error',

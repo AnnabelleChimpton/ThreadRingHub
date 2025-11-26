@@ -12,6 +12,7 @@ export const PostPolicySchema = z.enum(['OPEN', 'MEMBERS', 'CURATED', 'CLOSED'])
 // Ring creation schema
 export const CreateRingSchema = z.object({
   name: z.string().min(1).max(100),
+  slug: z.string().min(3).max(25).regex(/^[a-z0-9-]+$/).optional(),
   description: z.string().max(500).optional(),
   shortCode: z.string().min(2).max(10).regex(/^[a-zA-Z0-9-]+$/).optional(),
   visibility: RingVisibilitySchema.default('PUBLIC'),
@@ -68,6 +69,7 @@ export const TrendingQuerySchema = z.object({
 // Fork creation schema
 export const ForkRingSchema = z.object({
   name: z.string().min(1).max(100),
+  slug: z.string().min(3).max(25).regex(/^[a-z0-9-]+$/).optional(),
   description: z.string().max(500).optional(),
   shortCode: z.string().min(2).max(10).regex(/^[a-zA-Z0-9-]+$/).optional(),
   visibility: RingVisibilitySchema.default('PUBLIC'),

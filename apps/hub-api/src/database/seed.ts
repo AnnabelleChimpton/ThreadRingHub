@@ -114,7 +114,7 @@ async function main() {
     },
   });
 
-  const mobilityRing = await prisma.ring.create({
+  await prisma.ring.create({
     data: {
       slug: 'urban-mobility',
       name: 'Urban Mobility',
@@ -131,7 +131,7 @@ async function main() {
     },
   });
 
-  const privateRing = await prisma.ring.create({
+  await prisma.ring.create({
     data: {
       slug: 'beta-testers',
       name: 'Beta Testers',
@@ -264,7 +264,7 @@ async function main() {
   console.log(`✅ Created ${posts.length} post references`);
 
   // Create a challenge
-  const challenge = await prisma.challenge.create({
+  await prisma.challenge.create({
     data: {
       ringId: techRing.id,
       title: 'Share Your Green Tech Project',

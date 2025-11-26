@@ -1,4 +1,4 @@
-import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { FastifyInstance } from 'fastify';
 import { logger } from '../utils/logger';
 import { prisma } from '../database/prisma';
 import { authenticateActor, requireVerifiedActor } from '../security/middleware';

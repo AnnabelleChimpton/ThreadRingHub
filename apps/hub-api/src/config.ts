@@ -23,10 +23,12 @@ const configSchema = z.object({
   security: z.object({
     jwtSecret: z.string().min(32),
     bcryptRounds: z.number().int().min(10).max(15).default(12),
+    privateKey: z.string().optional(), // Base64 encoded private key
   }),
   rings: z.object({
     rootSlug: z.string().default('spool'),
   }),
+  hubUrl: z.string().url().default('https://ringhub.example.com'),
 });
 
 function loadConfig() {
@@ -49,10 +51,12 @@ function loadConfig() {
     security: {
       jwtSecret: process.env.JWT_SECRET || 'change-me-in-production-please-use-a-real-secret',
       bcryptRounds: parseInt(process.env.BCRYPT_ROUNDS || '12', 10),
+      privateKey: process.env.RING_HUB_PRIVATE_KEY,
     },
     rings: {
       rootSlug: process.env.ROOT_RING_SLUG || 'spool',
     },
+    hubUrl: process.env.RING_HUB_URL || 'https://ringhub.example.com',
   };
 
   return configSchema.parse(env);

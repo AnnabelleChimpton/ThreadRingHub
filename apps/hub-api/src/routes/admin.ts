@@ -38,7 +38,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       summary: 'Get users flagged for review',
       security: [{ httpSignature: [] }],
     }
-  }, async (request, reply) => {
+  }, async (_request, reply) => {
     try {
       const flaggedUsers = await RateLimitingService.getFlaggedUsers();
       reply.send({ flaggedUsers });
@@ -75,7 +75,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
       await RateLimitingService.clearViolations(actorDid);
 
-      logger.info({ 
+      logger.info({
         targetActorDid: actorDid,
         adminDid,
         action: 'clear_violations'
@@ -97,7 +97,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
   /**
    * POST /admin/apply-cooldown/:actorDid - Apply cooldown to user
    */
-  fastify.post<{ 
+  fastify.post<{
     Params: { actorDid: string },
     Body: { hours?: number, reason?: string }
   }>('/apply-cooldown/:actorDid', {
@@ -144,7 +144,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
         }
       });
 
-      logger.info({ 
+      logger.info({
         targetActorDid: actorDid,
         adminDid,
         hours,
@@ -193,7 +193,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
         data: { isAdmin: true }
       });
 
-      logger.info({ 
+      logger.info({
         targetActorDid: actorDid,
         adminDid,
         action: 'grant_admin'
@@ -248,7 +248,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
         data: { isAdmin: false }
       });
 
-      logger.info({ 
+      logger.info({
         targetActorDid: actorDid,
         adminDid,
         action: 'revoke_admin'
@@ -270,12 +270,12 @@ export async function adminRoutes(fastify: FastifyInstance) {
   /**
    * GET /admin/users - Search for users by name or DID
    */
-  fastify.get<{ 
-    Querystring: { 
-      search?: string; 
-      limit?: number; 
-      offset?: number; 
-    } 
+  fastify.get<{
+    Querystring: {
+      search?: string;
+      limit?: number;
+      offset?: number;
+    }
   }>('/users', {
     preHandler: [authenticateActor, requireVerifiedActor, requireAdmin],
     schema: {
@@ -296,7 +296,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       const { search, limit = 20, offset = 0 } = request.query;
 
       const where: any = { type: 'USER' };
-      
+
       if (search) {
         where.OR = [
           { name: { contains: search, mode: 'insensitive' } },

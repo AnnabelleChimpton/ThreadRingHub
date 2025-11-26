@@ -31,7 +31,8 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Log Prisma events
-prisma.$on('query', (e) => {
+// @ts-ignore
+prisma.$on('query', (e: any) => {
   if (process.env.LOG_LEVEL === 'debug') {
     logger.debug({
       query: e.query,
@@ -41,15 +42,18 @@ prisma.$on('query', (e) => {
   }
 });
 
-prisma.$on('error', (e) => {
+// @ts-ignore
+prisma.$on('error', (e: any) => {
   logger.error(e, 'Prisma Error');
 });
 
-prisma.$on('info', (e) => {
+// @ts-ignore
+prisma.$on('info', (e: any) => {
   logger.info(e, 'Prisma Info');
 });
 
-prisma.$on('warn', (e) => {
+// @ts-ignore
+prisma.$on('warn', (e: any) => {
   logger.warn(e, 'Prisma Warning');
 });
 
