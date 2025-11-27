@@ -2380,13 +2380,20 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                 return;
             }
 
-            // Check if actor is ring owner (additional check beyond middleware)
+            // Check if actor is ring owner or admin (additional check beyond middleware)
             if (ring.ownerDid !== actorDid) {
-                reply.code(403).send({
-                    error: 'Forbidden',
-                    message: 'Only ring owners can update badge configuration',
+                const isAdmin = await prisma.actor.findUnique({
+                    where: { did: actorDid },
+                    select: { isAdmin: true }
                 });
-                return;
+
+                if (!isAdmin?.isAdmin) {
+                    reply.code(403).send({
+                        error: 'Forbidden',
+                        message: 'Only ring owners can update badge configuration',
+                    });
+                    return;
+                }
             }
 
             // Validate at least one update field is provided
