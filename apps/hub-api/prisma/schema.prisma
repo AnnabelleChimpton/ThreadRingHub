@@ -37,6 +37,8 @@ model Ring {
   metadata    Json?    // Additional ring metadata
   policies    Json?    // Ring-specific policies
   curatorNote String?  // Curator's description/rules
+  bannerUrl   String?  // Banner image URL
+  themeColor  String?  @default("thread-pine") // Theme color for the ring
   
   // Badge images (provided by ring owner)
   badgeImageUrl    String?  // 88x31 badge image URL

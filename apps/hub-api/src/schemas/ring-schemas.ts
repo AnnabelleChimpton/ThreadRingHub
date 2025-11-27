@@ -20,6 +20,8 @@ export const CreateRingSchema = z.object({
   postPolicy: PostPolicySchema.default('OPEN'),
   parentSlug: z.string().optional(), // For creating forks
   curatorNote: z.string().max(1000).optional(),
+  bannerUrl: z.string().url().optional(),
+  themeColor: z.string().optional(),
   badgeImageUrl: z.string().url().optional(), // 88x31 badge image URL
   badgeImageHighResUrl: z.string().url().optional(), // 352x124 high-res badge image URL
   metadata: z.record(z.any()).optional(),
@@ -36,6 +38,8 @@ export const UpdateRingSchema = z.object({
   postPolicy: PostPolicySchema.optional(),
   parentSlug: z.string().optional(), // For updating parent threadring
   curatorNote: z.string().max(1000).optional(),
+  bannerUrl: z.string().url().optional(),
+  themeColor: z.string().optional(),
   badgeImageUrl: z.string().url().optional(), // 88x31 badge image URL
   badgeImageHighResUrl: z.string().url().optional(), // 352x124 high-res badge image URL
   metadata: z.record(z.any()).optional(),
@@ -209,19 +213,20 @@ export const RingResponseSchema = z.object({
   shortCode: z.string().nullable(),
   visibility: RingVisibilitySchema,
   joinPolicy: JoinPolicySchema,
-  postPolicy: PostPolicySchema,
-  ownerDid: z.string(),
-  parentId: z.string().nullable(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  curatorNote: z.string().nullable(),
-  badgeImageUrl: z.string().nullable(),
-  badgeImageHighResUrl: z.string().nullable(),
-  metadata: z.record(z.any()).nullable(),
-  policies: z.record(z.any()).nullable(),
-  // Computed fields
-  memberCount: z.number().optional(),
+  postPolicy: PostPolicySchema.optional(),
+  ownerDid: z.string().optional(),
+  parentId: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+  curatorNote: z.string().nullable().optional(),
+  bannerUrl: z.string().nullable().optional(),
+  themeColor: z.string().nullable().optional(),
+  badgeImageUrl: z.string().nullable().optional(),
+  badgeImageHighResUrl: z.string().nullable().optional(),
+  metadata: z.record(z.any()).nullable().optional(),
+  policies: z.record(z.any()).nullable().optional(),
   postCount: z.number().optional(),
+  memberCount: z.number().optional(),
   lineage: z.array(z.object({
     id: z.string(),
     slug: z.string(),
