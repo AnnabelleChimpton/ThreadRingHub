@@ -278,6 +278,11 @@ export function requireMembership(ringParam: string = 'slug') {
       return; // Authentication middleware should handle this
     }
 
+    // Admin override
+    if (request.actor.isAdmin) {
+      return;
+    }
+
     const ringSlug = (request.params as any)[ringParam];
     if (!ringSlug) {
       reply.code(400).send({
@@ -331,6 +336,11 @@ export function requireMembership(ringParam: string = 'slug') {
  */
 export function requirePermission(permission: string) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    // Admin override
+    if (request.actor?.isAdmin) {
+      return;
+    }
+
     const membership = (request as any).membership;
 
     if (!membership) {
