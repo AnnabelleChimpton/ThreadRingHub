@@ -46,11 +46,21 @@ export function getRedisClient(): Redis {
 export async function connectRedis(): Promise<void> {
   const client = getRedisClient();
   try {
-    await client.ping();
+    // With enableOfflineQueue disabled, ping() throws until the socket is
+    // ready, so wait for the 'ready' event (bounded) rather than pinging blind.
+    if (client.status !== 'ready') {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Redis connect timeout')), 3000);
+        client.once('ready', () => { clearTimeout(timer); resolve(); });
+        client.once('error', (err) => { clearTimeout(timer); reject(err); });
+      });
+    }
     logger.info('Redis connection established');
   } catch (error) {
-    logger.error(error, 'Failed to connect to Redis');
-    throw error;
+    // Redis is a cache — a hub that can't reach it should still start and
+    // serve requests (as cache misses), not crash-loop. ioredis keeps
+    // reconnecting in the background.
+    logger.error(error, 'Redis unavailable at startup — continuing without cache');
   }
 }
 
