@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL database
   postgres:
@@ -12,7 +10,10 @@ services:
       POSTGRES_PASSWORD: development_password_change_in_production
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
-      - "5432:5432"
+      # Localhost-only: with trust auth, a public 5432 is a passwordless
+      # database open to the internet. Docker published ports bypass most
+      # host firewalls, so the binding itself must be loopback.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -28,7 +29,7 @@ services:
     container_name: ringhub-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
       - ./infra/docker/redis/redis.conf:/etc/redis/redis.conf:ro
@@ -38,6 +39,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    labels:
+      - "autoheal=true"
 
   # Ring Hub API (development)
   hub-api:
@@ -72,8 +75,9 @@ services:
       RATE_LIMIT_MAX: 1000
       CORS_ORIGINS: "*"
     ports:
-      - "3000:3000"
-      - "9229:9229" # Node.js debugger
+      # Localhost-only: the reverse proxy on this host is the sole public entry
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:9229:9229" # Node.js debugger
     volumes:
       - ./apps/hub-api:/app/apps/hub-api
       - ./packages:/app/packages
@@ -85,6 +89,20 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    labels:
+      - "autoheal=true"
+
+  # Restarts any container whose healthcheck goes unhealthy (label-gated).
+  # Without this, an unhealthy container just sits there — Redis once
+  # zombied for months with "Up (unhealthy)" status.
+  autoheal:
+    image: willfarrell/autoheal:latest
+    container_name: ringhub-autoheal
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   # Adminer for database management (development only)
   adminer:
@@ -94,12 +112,12 @@ services:
     depends_on:
       - postgres
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       ADMINER_DEFAULT_SERVER: postgres
       ADMINER_DESIGN: "dracula"
 
-  # Redis Commander for cache management (development only)  
+  # Redis Commander for cache management (development only)
   redis-commander:
     image: rediscommander/redis-commander:latest
     container_name: ringhub-redis-commander
@@ -107,7 +125,7 @@ services:
     depends_on:
       - redis
     ports:
-      - "8081:8081"
+      - "127.0.0.1:8081:8081"
     environment:
       REDIS_HOSTS: local:redis:6379
 

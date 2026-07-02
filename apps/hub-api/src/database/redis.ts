@@ -11,9 +11,16 @@ export function getRedisClient(): Redis {
         const delay = Math.min(times * 50, 2000);
         return delay;
       },
-      maxRetriesPerRequest: 3,
+      maxRetriesPerRequest: 1,
       enableReadyCheck: true,
       lazyConnect: false,
+      // Redis here is a pure cache: a dead or zombied Redis must degrade to
+      // cache misses, never hang requests. Without these, ioredis queues
+      // commands indefinitely against a wedged connection (which once took
+      // down DID resolution — and with it all authentication — for months).
+      connectTimeout: 2000,
+      commandTimeout: 1500,
+      enableOfflineQueue: false,
     });
 
     redis.on('connect', () => {
