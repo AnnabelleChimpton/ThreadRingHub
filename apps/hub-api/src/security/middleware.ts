@@ -1,8 +1,32 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
+import crypto from 'crypto';
 import { verifyHttpSignature } from './http-signature';
 import { getActor, isActorBlocked, registerActor } from './actor-manager';
 import { logger } from '../utils/logger';
 import { prisma } from '../database/prisma';
+
+/**
+ * Emergency break-glass authentication for when signature verification is
+ * unavailable (e.g. a key rotation gone wrong). Requires the shared secret
+ * from RINGHUB_BREAK_GLASS_TOKEN in an `x-ringhub-break-glass` header.
+ *
+ * This replaces the old "admin bypass", which allowed ANY request naming an
+ * admin's (public) DID with an arbitrary invalid signature — an
+ * authentication bypass, since DIDs are public knowledge. A bearer secret is
+ * something only the operator holds. If the env var is unset, there is no
+ * bypass at all.
+ */
+function breakGlassAuthorized(request: FastifyRequest): boolean {
+  const configured = process.env.RINGHUB_BREAK_GLASS_TOKEN;
+  if (!configured) return false;
+
+  const provided = request.headers['x-ringhub-break-glass'];
+  if (typeof provided !== 'string' || provided.length === 0) return false;
+
+  const a = Buffer.from(provided);
+  const b = Buffer.from(configured);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 // Extend FastifyRequest to include actor information
 declare module 'fastify' {
@@ -48,43 +72,26 @@ export async function authenticateActor(
         reply.header('X-RingHub-Auth-Error', result.error || 'Unknown authentication error');
         return;
       }
-      // Check if this is an admin account that should bypass signature verification
-      if (result.actorDid) {
-        logger.info({ actorDid: result.actorDid }, 'Signature verification failed, checking admin status');
+      // Emergency access requires the operator's break-glass secret — the
+      // actor DID alone is public knowledge and never grants access.
+      if (result.actorDid && breakGlassAuthorized(request)) {
+        logger.warn({
+          actorDid: result.actorDid,
+          method: request.method,
+          url: request.url,
+        }, 'BREAK-GLASS: allowing request despite signature verification failure');
 
-        const actor = await prisma.actor.findUnique({
-          where: { did: result.actorDid },
-          select: { isAdmin: true, verified: true, trusted: true, name: true }
-        });
+        result.valid = true;
+        result.publicKey = result.publicKey || 'break-glass';
 
-        if (actor?.isAdmin) {
-          logger.info({ actorDid: result.actorDid }, 'Admin bypass: allowing request despite signature verification failure');
-
-          // Create a successful result for admin bypass
-          result.valid = true;
-          result.publicKey = result.publicKey || 'admin-bypass';
-
-          // Continue with admin actor setup below
-        } else {
-          logger.warn({
-            error: result.error,
-            method: request.method,
-            url: request.url,
-            actorDid: result.actorDid,
-            isAdmin: actor?.isAdmin || false
-          }, 'Authentication failed in middleware - not admin');
-          reply.code(401).send({
-            error: 'Authentication required',
-            message: result.error || 'Invalid or missing signature',
-          });
-          return;
-        }
+        // Continue with actor setup below
       } else {
         logger.warn({
           error: result.error,
           method: request.method,
-          url: request.url
-        }, 'Authentication failed in middleware - no actor DID');
+          url: request.url,
+          actorDid: result.actorDid,
+        }, 'Authentication failed in middleware');
         reply.code(401).send({
           error: 'Authentication required',
           message: result.error || 'Invalid or missing signature',
