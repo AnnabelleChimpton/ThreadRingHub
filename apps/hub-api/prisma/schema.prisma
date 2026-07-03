@@ -310,7 +310,8 @@ model HttpSignature {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   lastUsed  DateTime?
-  
+  expiresAt DateTime? // When the cached key should be re-resolved from the DID doc (rotation recovery)
+
   // Trust level for this key
   trusted   Boolean  @default(false)
   

@@ -1,5 +1,5 @@
 import { logger } from '../utils/logger';
-import { getCached, setCached } from '../database/redis';
+import { getCached, setCached, deleteCached } from '../database/redis';
 
 export interface DIDDocument {
   '@context': string[];
@@ -123,15 +123,28 @@ function base58ToBytes(base58: string): Uint8Array {
 }
 
 /**
- * Resolve a DID to its document
+ * Resolve a DID to its document.
+ *
+ * When `forceRefresh` is true, the Redis cache entry is invalidated and the DID
+ * document is re-fetched from the network. This is used for key-rotation
+ * recovery: if a signature fails, we re-resolve the DID doc once to pick up a
+ * rotated key before declaring the signature invalid.
  */
-export async function resolveDID(did: string): Promise<DIDDocument | null> {
+export async function resolveDID(
+  did: string,
+  forceRefresh: boolean = false
+): Promise<DIDDocument | null> {
   try {
     // Check cache first
     const cacheKey = `did:${did}`;
-    const cached = await getCached<DIDDocument>(cacheKey);
-    if (cached) {
-      return cached;
+    if (forceRefresh) {
+      await deleteCached(cacheKey);
+      logger.info({ did }, 'Force-refreshing DID document (bypassing cache)');
+    } else {
+      const cached = await getCached<DIDDocument>(cacheKey);
+      if (cached) {
+        return cached;
+      }
     }
 
     let document: DIDDocument | null = null;
@@ -329,20 +342,40 @@ export function extractPublicKey(
       return null;
     }
 
-    // Return the public key in the appropriate format
-    if (method.publicKeyBase64) {
-      return method.publicKeyBase64;
-    }
+    // Decode whichever key representations are present.
+    const fromBase64 = method.publicKeyBase64 || null;
+    const fromMultibase = method.publicKeyMultibase
+      ? convertMultibaseToBase64(method.publicKeyMultibase)
+      : null;
 
     if (method.publicKeyMultibase) {
-      // Convert multibase to base64
-      const converted = convertMultibaseToBase64(method.publicKeyMultibase);
-      logger.info({ 
-        original: method.publicKeyMultibase, 
-        converted,
-        success: !!converted 
+      logger.info({
+        original: method.publicKeyMultibase,
+        converted: fromMultibase,
+        success: !!fromMultibase,
       }, 'Converting multibase key to base64');
-      return converted;
+    }
+
+    // When BOTH representations are present, they must agree. If they disagree,
+    // one form is stale/wrong and silently trusting base64 would make that
+    // actor's signatures fail unpredictably. Prefer publicKeyMultibase (the
+    // canonical form) and log loudly so the divergence is caught.
+    if (fromBase64 && fromMultibase && fromBase64 !== fromMultibase) {
+      logger.warn({
+        keyId: method.id,
+        controller: method.controller,
+        publicKeyBase64: fromBase64,
+        publicKeyMultibaseDecoded: fromMultibase,
+      }, 'DID verificationMethod has BOTH publicKeyBase64 and publicKeyMultibase and they DISAGREE — preferring publicKeyMultibase (canonical)');
+      return fromMultibase;
+    }
+
+    // Otherwise behavior is identical to before: prefer whichever is present.
+    if (fromBase64) {
+      return fromBase64;
+    }
+    if (fromMultibase) {
+      return fromMultibase;
     }
 
     return null;

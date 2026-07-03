@@ -28,6 +28,30 @@ async function buildApp() {
     trustProxy: true,
   });
 
+  // Capture the RAW request body bytes for JSON requests so HTTP-signature
+  // Digest validation can hash the exact bytes the client signed. Fastify's
+  // default JSON parser discards the raw payload; this replacement stashes it
+  // on request.rawBody and still parses the JSON as normal.
+  fastify.addContentTypeParser(
+    'application/json',
+    { parseAs: 'buffer' },
+    (req, body: Buffer, done) => {
+      (req as any).rawBody = body;
+      if (body.length === 0) {
+        // Preserve Fastify's default behaviour for empty JSON bodies.
+        done(null, undefined);
+        return;
+      }
+      try {
+        const json = JSON.parse(body.toString('utf8'));
+        done(null, json);
+      } catch (err) {
+        (err as any).statusCode = 400;
+        done(err as Error, undefined);
+      }
+    }
+  );
+
   // Register core plugins
   await fastify.register(sensible);
   await fastify.register(helmet, {

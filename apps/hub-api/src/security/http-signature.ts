@@ -89,17 +89,18 @@ function parseSignatureHeader(signatureHeader: string): SignatureComponents | nu
  */
 function buildSigningString(
   request: FastifyRequest,
-  headers: string[]
+  headers: string[],
+  components: SignatureComponents
 ): string {
   const lines: string[] = [];
-  
-  logger.info({ 
-    method: request.method, 
-    url: request.url, 
+
+  logger.info({
+    method: request.method,
+    url: request.url,
     headers: Object.keys(request.headers),
-    requestHeaders: headers 
+    requestHeaders: headers
   }, 'Building signing string from request');
-  
+
   for (const header of headers) {
     if (header === '(request-target)') {
       // Special case: request target
@@ -109,44 +110,29 @@ function buildSigningString(
       lines.push(line);
       logger.info({ line }, 'Added request-target to signing string');
     } else if (header === '(created)') {
-      // Special case: created timestamp
-      const created = Math.floor(Date.now() / 1000);
-      const line = `(created): ${created}`;
+      // Use the value the CLIENT signed (from the signature params), NOT a
+      // locally recomputed Date.now() — recomputing guarantees a mismatch.
+      const created = components.created;
+      const line = `(created): ${created ?? ''}`;
       lines.push(line);
-      logger.info({ line }, 'Added created to signing string');
+      logger.info({ line }, 'Added client-signed created to signing string');
     } else if (header === '(expires)') {
-      // Special case: expires timestamp
-      const expires = Math.floor(Date.now() / 1000) + 300; // 5 minutes
-      const line = `(expires): ${expires}`;
+      // Use the value the CLIENT signed, not a locally recomputed one.
+      const expires = components.expires;
+      const line = `(expires): ${expires ?? ''}`;
       lines.push(line);
-      logger.info({ line }, 'Added expires to signing string');
+      logger.info({ line }, 'Added client-signed expires to signing string');
     } else if (header === 'digest') {
-      // Use the digest header from the request (already calculated by client)
+      // Include the client's Digest header verbatim in the signing string.
+      // Correctness of the digest vs. the actual body is validated separately
+      // in validateDigest() against the RAW request bytes.
       const value = request.headers['digest'];
       if (value) {
         const line = `digest: ${value}`;
         lines.push(line);
-        
-        // Also calculate what the server would compute to compare
-        const body = JSON.stringify(request.body || '');
-        const serverCalculatedDigest = Buffer.from(sha256(body)).toString('base64');
-        const serverDigestHeader = `sha-256=${serverCalculatedDigest}`;
-        
-        logger.info({ 
-          line, 
-          clientDigest: value,
-          serverCalculated: serverDigestHeader,
-          requestBody: body,
-          digestsMatch: value === serverDigestHeader
-        }, 'Added digest from request header to signing string with comparison');
+        logger.info({ line }, 'Added digest header to signing string');
       } else {
-        // Fallback: calculate digest
-        const body = JSON.stringify(request.body || '');
-        const digest = Buffer.from(sha256(body)).toString('base64');
-        const digestHeader = `sha-256=${digest}`;
-        const line = `digest: ${digestHeader}`;
-        lines.push(line);
-        logger.warn({ line, body, digest, digestHeader }, 'Added calculated digest fallback to signing string');
+        logger.warn({ availableHeaders: Object.keys(request.headers) }, 'Digest listed in signed headers but no Digest header present');
       }
     } else {
       // Regular header
@@ -209,8 +195,140 @@ async function verifyEd25519Signature(
   }
 }
 
+// How long a cached did:web key is trusted before it must be re-resolved from
+// the DID document. Bounded so a rotated client key recovers within a day even
+// if no verification failure triggers an earlier re-resolve.
+const KEY_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
 /**
- * Fetch public key for a given keyId
+ * Resolve a key straight from its DID document (optionally bypassing the DID
+ * doc cache) and, for did:web, upsert it into the DB cache with a fresh TTL.
+ *
+ * did:key keys are self-contained and are never cached in the DB.
+ */
+async function resolveKeyFromDID(
+  keyId: string,
+  forceRefresh: boolean = false
+): Promise<string | null> {
+  const did = keyId.split('#')[0];
+
+  if (did.startsWith('did:web:')) {
+    logger.info({ keyId, did, forceRefresh }, 'Resolving did:web DID for key');
+
+    const didDocument = await resolveDID(did, forceRefresh);
+    if (didDocument) {
+      const publicKey = extractPublicKey(didDocument, keyId);
+      if (publicKey) {
+        // Upsert so both first-resolution and rotation updates land on the
+        // same row, with a refreshed expiry.
+        await prisma.httpSignature.upsert({
+          where: { keyId },
+          create: {
+            keyId,
+            publicKey,
+            actorDid: did,
+            trusted: false, // Keys start untrusted
+            expiresAt: new Date(Date.now() + KEY_CACHE_TTL_MS),
+          },
+          update: {
+            publicKey,
+            expiresAt: new Date(Date.now() + KEY_CACHE_TTL_MS),
+            lastUsed: new Date(),
+          },
+        });
+
+        logger.info({ keyId, did }, 'Cached public key from did:web DID resolution');
+        return publicKey;
+      }
+    }
+    return null;
+  }
+
+  if (did.startsWith('did:key:')) {
+    logger.info({ keyId, did }, 'Resolving did:key DID for key');
+
+    // did:key is self-contained — resolve but don't cache in the DB.
+    const didDocument = await resolveDID(did, forceRefresh);
+    if (didDocument) {
+      const publicKey = extractPublicKey(didDocument, keyId);
+      if (publicKey) {
+        logger.info({ keyId, did }, 'Resolved public key from did:key DID');
+        return publicKey;
+      }
+    }
+    return null;
+  }
+
+  logger.warn({ keyId, did }, 'Unsupported DID method for key resolution');
+  return null;
+}
+
+// Maximum allowed difference between the signed Date header and the hub's
+// clock, in seconds. Rejects replayed/stale requests without being so tight
+// that normal clock drift between peers trips it.
+const CLOCK_SKEW_SECONDS = 300;
+
+/**
+ * Validate the client's Digest header against the RAW request body bytes.
+ *
+ * Returns true when there is nothing to reject:
+ *  - no Digest header present (e.g. GETs / bodyless requests) — skip the check
+ *    entirely for backward-compat; a Digest is not required.
+ *  - Digest present and it matches sha-256 base64 of the raw body bytes.
+ *
+ * Returns false only when a Digest header IS present and does NOT match the
+ * actual body — i.e. the body was tampered with (or the client mis-computed).
+ *
+ * IMPORTANT: the digest MUST be computed over the exact raw bytes the client
+ * hashed, not over a re-serialization of the parsed body (JSON.stringify would
+ * reorder keys / change whitespace and mismatch).
+ */
+function validateDigest(request: FastifyRequest): boolean {
+  const digestHeader = request.headers['digest'];
+  if (!digestHeader || typeof digestHeader !== 'string') {
+    // No Digest header — nothing to validate (bodyless request / GET).
+    return true;
+  }
+
+  // Only sha-256 is supported. Header form: "sha-256=<base64>".
+  const match = /^sha-256=(.+)$/i.exec(digestHeader.trim());
+  if (!match) {
+    logger.warn({ digestHeader }, 'Unsupported or malformed Digest header algorithm — rejecting');
+    return false;
+  }
+  const claimedDigest = match[1];
+
+  // Recover the raw bytes the client signed over.
+  const rawBody: Buffer | undefined = (request as any).rawBody;
+  if (rawBody === undefined) {
+    // A Digest header was sent but we captured no raw body. Treat an empty
+    // body as zero bytes so an explicit `sha-256=` over "" still validates.
+    logger.warn('Digest header present but no raw body captured — treating body as empty');
+  }
+  const bodyBytes = rawBody !== undefined ? rawBody : Buffer.alloc(0);
+
+  const computed = Buffer.from(sha256(bodyBytes)).toString('base64');
+
+  if (computed !== claimedDigest) {
+    logger.warn({
+      claimedDigest,
+      computedDigest: computed,
+      bodyLength: bodyBytes.length,
+    }, 'Digest header does not match request body — rejecting');
+    return false;
+  }
+
+  logger.info('Digest header validated against raw body');
+  return true;
+}
+
+/**
+ * Fetch public key for a given keyId.
+ *
+ * Uses the DB cache but honours `expiresAt`: on a cache hit whose TTL has
+ * lapsed, the DID document is re-resolved and the row updated with the fresh
+ * key. If re-resolution fails (e.g. the DID doc is unreachable) we fall back to
+ * the stale cached key rather than hard-failing authentication.
  */
 async function fetchPublicKey(keyId: string): Promise<string | null> {
   try {
@@ -218,57 +336,39 @@ async function fetchPublicKey(keyId: string): Promise<string | null> {
     const cached = await prisma.httpSignature.findUnique({
       where: { keyId },
     });
-    
+
     if (cached) {
-      // Update last used timestamp
+      const expired = cached.expiresAt != null && cached.expiresAt.getTime() < Date.now();
+
+      if (expired) {
+        logger.info({ keyId, expiresAt: cached.expiresAt }, 'Cached key expired — re-resolving DID document');
+        const fresh = await resolveKeyFromDID(keyId, /* forceRefresh */ true);
+        if (fresh) {
+          if (fresh !== cached.publicKey) {
+            logger.warn({ keyId }, 'Cached key rotated on TTL refresh — swapped to newly resolved key');
+          }
+          return fresh;
+        }
+        // Re-resolution failed (DID doc unreachable). Fall back to the stale
+        // cached key so a transient outage doesn't lock out the client.
+        logger.warn({ keyId }, 'Could not re-resolve expired key — falling back to stale cached key');
+      }
+
+      // Update last used timestamp (best-effort)
       await prisma.httpSignature.update({
         where: { keyId },
         data: { lastUsed: new Date() },
       });
-      
+
       return cached.publicKey;
     }
-    
-    // Extract DID from keyId (format: "did:web:domain.com#key-1" or "did:key:z6Mk...#key-1")
-    const did = keyId.split('#')[0];
-    
-    if (did.startsWith('did:web:')) {
-      logger.info({ keyId, did }, 'Resolving did:web DID for unknown key');
-      
-      // Resolve DID document to get public key
-      const didDocument = await resolveDID(did);
-      if (didDocument) {
-        const publicKey = extractPublicKey(didDocument, keyId);
-        if (publicKey) {
-          // Cache the key for future use
-          await prisma.httpSignature.create({
-            data: {
-              keyId,
-              publicKey,
-              actorDid: did,
-              trusted: false, // Keys start untrusted
-            },
-          });
-          
-          logger.info({ keyId, did }, 'Cached public key from did:web DID resolution');
-          return publicKey;
-        }
-      }
-    } else if (did.startsWith('did:key:')) {
-      logger.info({ keyId, did }, 'Resolving did:key DID for unknown key');
-      
-      // For did:key, resolve the DID document (self-contained)
-      const didDocument = await resolveDID(did);
-      if (didDocument) {
-        const publicKey = extractPublicKey(didDocument, keyId);
-        if (publicKey) {
-          // Don't cache did:key keys in database as they're self-contained
-          logger.info({ keyId, did }, 'Resolved public key from did:key DID');
-          return publicKey;
-        }
-      }
+
+    // Unknown key: resolve from the DID document for the first time.
+    const resolved = await resolveKeyFromDID(keyId, /* forceRefresh */ false);
+    if (resolved) {
+      return resolved;
     }
-    
+
     logger.warn({ keyId }, 'Failed to resolve public key');
     return null;
   } catch (error) {
@@ -327,7 +427,29 @@ export async function verifyHttpSignature(
     if (components.expires && components.expires < now) {
       return { valid: false, error: 'Signature expired' };
     }
-    
+
+    // Enforce clock-skew on the signed Date header (only when 'date' is among
+    // the signed headers). Rejects stale/replayed requests.
+    if (components.headers.includes('date')) {
+      const dateHeader = request.headers['date'];
+      if (dateHeader && typeof dateHeader === 'string') {
+        const dateMs = Date.parse(dateHeader);
+        if (Number.isNaN(dateMs)) {
+          return { valid: false, error: 'Invalid Date header' };
+        }
+        const skewSeconds = Math.abs(Date.now() - dateMs) / 1000;
+        if (skewSeconds > CLOCK_SKEW_SECONDS) {
+          logger.warn({ dateHeader, skewSeconds }, 'Date header outside allowed clock-skew window');
+          return { valid: false, error: 'Date header outside allowed clock-skew window' };
+        }
+      }
+    }
+
+    // Validate the Digest header against the raw body (skipped when absent).
+    if (!validateDigest(request)) {
+      return { valid: false, error: 'Digest does not match request body' };
+    }
+
     // Fetch public key
     const publicKey = await fetchPublicKey(components.keyId);
     if (!publicKey) {
@@ -343,53 +465,75 @@ export async function verifyHttpSignature(
       publicKeyLength: publicKey.length 
     }, 'Resolved public key for signature verification');
     
-    // Build signing string
-    const signingString = buildSigningString(request, components.headers);
-    logger.info({ 
-      signingString, 
+    // Build signing string (deterministic: created/expires come from the
+    // client-signed params, not from the verifier's clock).
+    const signingString = buildSigningString(request, components.headers, components);
+    logger.info({
+      signingString,
       publicKey: publicKey.substring(0, 16) + '...',
       signature: components.signature.substring(0, 16) + '...',
-      headers: components.headers 
+      headers: components.headers
     }, 'Verifying signature with details');
-    
+
     // Verify signature
     // Get actor DID from key BEFORE verification (so it's available even if verification fails)
     const key = await prisma.httpSignature.findUnique({
       where: { keyId: components.keyId },
       select: { actorDid: true },
     });
-    
+
     const actorDid = key?.actorDid || components.keyId.split('#')[0];
-    
-    const valid = await verifyEd25519Signature(
-      publicKey,
+
+    let usedPublicKey = publicKey;
+    let valid = await verifyEd25519Signature(
+      usedPublicKey,
       signingString,
       components.signature
     );
-    
+
+    // Rotation self-heal: if verification fails against the (possibly cached)
+    // key for a did:web keyId, force a single DID-document re-resolution and
+    // retry. This lets a rotated client key recover immediately instead of
+    // waiting for the cache TTL to lapse.
+    if (!valid && components.keyId.split('#')[0].startsWith('did:web:')) {
+      logger.info({ keyId: components.keyId }, 'Signature invalid — re-resolving DID document once to check for key rotation');
+      const freshKey = await resolveKeyFromDID(components.keyId, /* forceRefresh */ true);
+      if (freshKey && freshKey !== usedPublicKey) {
+        logger.warn({ keyId: components.keyId }, 'Re-resolve swapped the cached key (rotation) — retrying verification with fresh key');
+        usedPublicKey = freshKey;
+        valid = await verifyEd25519Signature(
+          usedPublicKey,
+          signingString,
+          components.signature
+        );
+      } else {
+        logger.info({ keyId: components.keyId }, 'Re-resolve did not change the key — signature remains invalid');
+      }
+    }
+
     logger.info({ valid, keyId: components.keyId }, 'HTTP signature verification completed');
-    
+
     if (!valid) {
       logger.warn({ keyId: components.keyId }, 'HTTP signature verification failed - invalid signature');
-      return { 
-        valid: false, 
+      return {
+        valid: false,
         error: 'Invalid signature',
         actorDid,  // Include actorDid even when verification fails
         keyId: components.keyId,
-        publicKey
+        publicKey: usedPublicKey
       };
     }
-    logger.info({ 
-      keyId: components.keyId, 
+    logger.info({
+      keyId: components.keyId,
       actorDid,
-      fromCache: !!key?.actorDid 
+      fromCache: !!key?.actorDid
     }, 'HTTP signature verification successful');
-    
+
     return {
       valid: true,
       actorDid,
       keyId: components.keyId,
-      publicKey: publicKey,
+      publicKey: usedPublicKey,
     };
   } catch (error) {
     logger.error({ error }, 'HTTP signature verification failed');
@@ -397,43 +541,6 @@ export async function verifyHttpSignature(
       valid: false, 
       error: 'Internal error during signature verification' 
     };
-  }
-}
-
-/**
- * Generate HTTP signature for outgoing requests
- */
-export async function generateHttpSignature(
-  method: string,
-  url: string,
-  headers: Record<string, string>,
-  privateKey: string,
-  keyId: string
-): Promise<string> {
-  try {
-    // Build signing string
-    const requestTarget = `(request-target): ${method.toLowerCase()} ${url}`;
-    const date = `date: ${headers['date'] || new Date().toUTCString()}`;
-    const host = `host: ${headers['host'] || new URL(url).host}`;
-    
-    const signingString = [requestTarget, host, date].join('\n');
-    
-    // Sign with Ed25519
-    const privateKeyBytes = Buffer.from(privateKey, 'base64');
-    const messageBytes = new TextEncoder().encode(signingString);
-    const signatureBytes = await ed.sign(messageBytes, privateKeyBytes);
-    const signature = Buffer.from(signatureBytes).toString('base64');
-    
-    // Build signature header
-    return [
-      `keyId="${keyId}"`,
-      `algorithm="ed25519"`,
-      `headers="(request-target) host date"`,
-      `signature="${signature}"`,
-    ].join(',');
-  } catch (error) {
-    logger.error({ error }, 'Failed to generate HTTP signature');
-    throw error;
   }
 }
 

@@ -39,6 +39,9 @@ declare module 'fastify' {
       isAdmin: boolean;
     };
     keyId?: string;
+    // Raw request body bytes, captured by the JSON content-type parser in
+    // index.ts, used for HTTP-signature Digest validation.
+    rawBody?: Buffer;
   }
 }
 
