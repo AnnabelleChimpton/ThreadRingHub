@@ -29,6 +29,8 @@ lerna-debug.log*
 .env.test.local
 .env.production.local
 *.env
+# ...but the committed template must stay tracked.
+!.env.example
 
 # IDE
 .vscode/*
@@ -113,4 +115,3 @@ secrets/
 
 THREADSTEAD_EXAMPLES/
 .claude/
-docker-compose.yml

@@ -5,9 +5,10 @@ services:
     container_name: ringhub-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ringhub
-      POSTGRES_USER: ringhub
-      POSTGRES_PASSWORD: development_password_change_in_production
+      POSTGRES_DB: ${POSTGRES_DB:-ringhub}
+      POSTGRES_USER: ${POSTGRES_USER:-ringhub}
+      # Secret: no default. Provide via the gitignored .env next to this file.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
       # Localhost-only: with trust auth, a public 5432 is a passwordless
@@ -56,24 +57,31 @@ services:
       redis:
         condition: service_healthy
     environment:
-      NODE_ENV: development
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: 3000
-      DATABASE_URL: postgresql://ringhub:development_password_change_in_production@postgres:5432/ringhub
+      # Password comes from the secret POSTGRES_PASSWORD (no default) so the
+      # connection string never hardcodes a credential.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ringhub}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ringhub}
       REDIS_URL: redis://redis:6379
-      LOG_LEVEL: debug
-      # Development keys - NEVER use in production
-      SIGNING_KEY: "ed25519-development-key-change-in-production"
-      JWT_SECRET: "development-jwt-secret-change-in-production"
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      # Secrets: no defaults. In production these MUST be set in .env.
+      SIGNING_KEY: ${SIGNING_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      # Persistent Ed25519 badge-signing key (base64 of a PKCS#8 PEM key).
+      # Unset => hub runs with an ephemeral key and refuses to issue badges in production.
+      RING_HUB_PRIVATE_KEY: ${RING_HUB_PRIVATE_KEY}
+      # Break-glass admin token consumed by security/middleware.ts.
+      RINGHUB_BREAK_GLASS_TOKEN: ${RINGHUB_BREAK_GLASS_TOKEN}
       # Instance configuration
-      INSTANCE_DID: "did:web:localhost:3000"
-      INSTANCE_NAME: "Ring Hub Development"
+      INSTANCE_DID: ${INSTANCE_DID:-did:web:localhost:3000}
+      INSTANCE_NAME: ${INSTANCE_NAME:-Ring Hub Development}
       # Feature flags
-      FEDERATION_ENABLED: "false"
-      ACTIVITYPUB_ENABLED: "false"
+      FEDERATION_ENABLED: ${FEDERATION_ENABLED:-false}
+      ACTIVITYPUB_ENABLED: ${ACTIVITYPUB_ENABLED:-false}
       # Security settings (relaxed for development)
-      RATE_LIMIT_ENABLED: "true"
-      RATE_LIMIT_MAX: 1000
-      CORS_ORIGINS: "*"
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-1000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     ports:
       # Localhost-only: the reverse proxy on this host is the sole public entry
       - "127.0.0.1:3000:3000"

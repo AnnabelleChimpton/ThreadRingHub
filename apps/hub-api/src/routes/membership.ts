@@ -19,23 +19,7 @@ import { generateBadge, verifyBadge, revokeBadge, isBadgeRevoked } from '../util
 import { resolveActorProfile, validateProfileServiceEndpoint } from '../services/profile-resolver';
 import { resolveDID } from '../security/did-resolver';
 import crypto from 'crypto';
-
-// Load persistent private key from config or generate a temporary one (with warning)
-let RING_HUB_PRIVATE_KEY: crypto.KeyObject;
-
-if (config.security.privateKey) {
-  try {
-    const privateKeyBuffer = Buffer.from(config.security.privateKey, 'base64');
-    RING_HUB_PRIVATE_KEY = crypto.createPrivateKey(privateKeyBuffer);
-    logger.info('Loaded persistent RING_HUB_PRIVATE_KEY from configuration');
-  } catch (error) {
-    logger.error({ error }, 'Failed to load configured RING_HUB_PRIVATE_KEY, falling back to ephemeral key');
-    RING_HUB_PRIVATE_KEY = crypto.generateKeyPairSync('ed25519').privateKey;
-  }
-} else {
-  logger.warn('No RING_HUB_PRIVATE_KEY configured! Using ephemeral key. Badges will be invalid after restart.');
-  RING_HUB_PRIVATE_KEY = crypto.generateKeyPairSync('ed25519').privateKey;
-}
+import { RING_HUB_PRIVATE_KEY, ephemeralBadgeIssuanceBlock } from '../utils/signing-key';
 
 const RING_HUB_URL = config.hubUrl;
 
@@ -251,7 +235,13 @@ export async function membershipRoutes(fastify: FastifyInstance) {
 
       // Generate badge if membership is active
       let badge = null;
-      if (membershipStatus === 'ACTIVE') {
+      const issuanceBlock = ephemeralBadgeIssuanceBlock();
+      if (membershipStatus === 'ACTIVE' && issuanceBlock) {
+        // Ephemeral key in production: do NOT hand out a badge that is
+        // guaranteed to be invalid after the next restart. The membership
+        // itself still succeeds; only the badge is withheld.
+        logger.error({ ringSlug, actorDid }, issuanceBlock);
+      } else if (membershipStatus === 'ACTIVE') {
         try {
           badge = await generateBadge(
             ring.slug,

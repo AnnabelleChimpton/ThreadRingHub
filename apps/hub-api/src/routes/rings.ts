@@ -24,7 +24,7 @@ import {
 } from '../schemas/ring-schemas';
 import { config } from '../config';
 import { generateBadge } from '../utils/badge';
-import crypto from 'crypto';
+import { RING_HUB_PRIVATE_KEY, ephemeralBadgeIssuanceBlock } from '../utils/signing-key';
 
 /**
  * Generate a unique slug from ring name
@@ -1727,13 +1727,15 @@ export async function ringsRoutes(fastify: FastifyInstance) {
 
             // Generate badge for fork creator (owner)
             let badge = null;
-            try {
-                // Badge generation for fork owner
-
-                // TODO: Use proper private key from environment
-                const RING_HUB_PRIVATE_KEY = crypto.generateKeyPairSync('ed25519').privateKey;
-
-                const RING_HUB_URL = process.env.RING_HUB_URL || 'https://ringhub.io';
+            const forkIssuanceBlock = ephemeralBadgeIssuanceBlock();
+            if (forkIssuanceBlock) {
+                // Ephemeral key in production: withhold the fork-owner badge
+                // rather than issue one that will be invalid after restart.
+                logger.error({ ringSlug: ring.slug, actorDid }, forkIssuanceBlock);
+            } else try {
+                // Use the shared, persistent hub signing key (falls back to an
+                // ephemeral key with a loud warning when unconfigured).
+                const RING_HUB_URL = config.hubUrl;
 
                 badge = await generateBadge(
                     ring.slug,
@@ -2418,7 +2420,12 @@ export async function ringsRoutes(fastify: FastifyInstance) {
             let badgesUpdated = null;
 
             // Regenerate existing badges if requested
-            if (updateExistingBadges) {
+            const regenIssuanceBlock = ephemeralBadgeIssuanceBlock();
+            if (updateExistingBadges && regenIssuanceBlock) {
+                // Ephemeral key in production: refuse to re-sign badges with a
+                // key that will be invalid after restart.
+                logger.error({ ringSlug: slug, actorDid }, regenIssuanceBlock);
+            } else if (updateExistingBadges) {
                 try {
                     // Get all active memberships for this ring
                     const memberships = await prisma.membership.findMany({
@@ -2443,8 +2450,8 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                                 ring.name,
                                 membership.actorDid,
                                 membership.role?.name || 'member',
-                                crypto.generateKeyPairSync('ed25519').privateKey,
-                                process.env.RING_HUB_URL || 'https://ringhub.io',
+                                RING_HUB_PRIVATE_KEY,
+                                config.hubUrl,
                                 updatedRing.badgeImageUrl || undefined,
                                 updatedRing.badgeImageHighResUrl || undefined
                             );
