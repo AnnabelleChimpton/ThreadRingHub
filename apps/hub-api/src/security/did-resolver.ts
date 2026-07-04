@@ -184,38 +184,40 @@ async function resolveWebDID(did: string): Promise<DIDDocument | null> {
 
     // Remove 'did:web:' prefix
     const domainParts = parts.slice(2);
-    
+
+    // did:web percent-encodes the port separator (did:web:localhost%3A3000).
+    const domain = decodeURIComponent(domainParts[0]);
+
+    // Loopback DIDs resolve over plain http so local dev and integration
+    // harnesses can serve REAL DID documents without provisioning TLS.
+    const isLoopback =
+      domain === 'localhost' || domain.startsWith('localhost:') ||
+      domain === '127.0.0.1' || domain.startsWith('127.0.0.1:');
+    const scheme = isLoopback ? 'http' : 'https';
+
     // Convert to URL based on DID structure
     let url: string;
-    
+
     if (domainParts.length === 1) {
       // Root domain DID: did:web:example.com -> https://example.com/.well-known/did.json
-      url = `https://${domainParts[0]}/.well-known/did.json`;
+      url = `${scheme}://${domain}/.well-known/did.json`;
     } else if (domainParts.length === 3 && (domainParts[1] === 'users' || domainParts[1] === 'actors')) {
-      // User/Actor DID: 
+      // User/Actor DID:
       // did:web:example.com:users:hash -> https://example.com/users/hash/did.json
       // did:web:example.com:actors:alice -> https://example.com/actors/alice/did.json
-      const domain = domainParts[0];
       const type = domainParts[1]; // 'users' or 'actors'
       const identifier = domainParts[2];
-      url = `https://${domain}/${type}/${identifier}/did.json`;
+      url = `${scheme}://${domain}/${type}/${identifier}/did.json`;
     } else {
       // Generic path-based DID: did:web:example.com:path:to:resource
       // -> https://example.com/path/to/resource/did.json
-      const domain = domainParts[0];
       const path = domainParts.slice(1).join('/');
-      url = `https://${domain}/${path}/did.json`;
-    }
-
-    // In production, this would make an HTTP request
-    // For now, we'll create a mock response for local development
-    if (did.includes('localhost')) {
-      return createMockWebDID(did);
+      url = `${scheme}://${domain}/${path}/did.json`;
     }
 
     // Fetch DID document from URL
     logger.info({ did, url }, 'Fetching DID document from URL');
-    
+
     try {
       const response = await fetch(url, {
         method: 'GET',
@@ -228,7 +230,10 @@ async function resolveWebDID(did: string): Promise<DIDDocument | null> {
 
       if (!response.ok) {
         logger.warn({ url, status: response.status }, 'Failed to fetch DID document');
-        return null;
+        // Legacy local-dev fallback: previously every localhost DID
+        // short-circuited to a mock document without any fetch. Keep the mock
+        // for loopback DIDs nothing is serving, so dev setups keep working.
+        return isLoopback ? createMockWebDID(did) : null;
       }
 
       const document = await response.json() as DIDDocument;
@@ -236,7 +241,7 @@ async function resolveWebDID(did: string): Promise<DIDDocument | null> {
       return document;
     } catch (fetchError) {
       logger.error({ error: fetchError, url }, 'HTTP fetch failed for DID document');
-      return null;
+      return isLoopback ? createMockWebDID(did) : null;
     }
   } catch (error) {
     logger.error({ error, did }, 'Failed to resolve did:web');
@@ -312,6 +317,14 @@ function createMockWebDID(did: string): DIDDocument {
         id: `${did}#ring-hub`,
         type: 'RingHub',
         serviceEndpoint: 'http://localhost:3100/trp',
+      },
+      // Joining requires a Profile service (validateProfileServiceEndpoint);
+      // without it, every mock-resolved local-dev join fails with
+      // "Invalid DID Document".
+      {
+        id: `${did}#profile`,
+        type: 'Profile',
+        serviceEndpoint: 'http://localhost:3100/profile',
       },
     ],
   };

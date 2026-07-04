@@ -237,7 +237,24 @@ export function requireNotBlocked(ringParam: string = 'slug') {
       ringSlug = (request.body as any).ringSlug || (request.body as any)[ringParam];
     }
 
-    if (!ringSlug) {
+    // Content-moderation endpoints (/trp/curate) identify the ring only
+    // indirectly via postId. Resolve it here — without this, every curate
+    // call 400'd with "Ring identifier required" (broken since the route
+    // shipped), which is how author-side post deletion never reached the hub.
+    let ringIdFromPost: string | null = null;
+    if (!ringSlug && request.body && (request.body as any).postId) {
+      const postRef = await prisma.postRef.findUnique({
+        where: { id: (request.body as any).postId },
+        select: { ringId: true },
+      });
+      if (!postRef) {
+        // Unknown post: let the route handler produce its own 404.
+        return;
+      }
+      ringIdFromPost = postRef.ringId;
+    }
+
+    if (!ringSlug && !ringIdFromPost) {
       reply.code(400).send({
         error: 'Invalid request',
         message: 'Ring identifier required',
@@ -246,22 +263,26 @@ export function requireNotBlocked(ringParam: string = 'slug') {
     }
 
     try {
-      // Get ring ID from slug
-      const ring = await prisma.ring.findUnique({
-        where: { slug: ringSlug },
-        select: { id: true },
-      });
-
-      if (!ring) {
-        reply.code(404).send({
-          error: 'Not found',
-          message: 'Ring not found',
+      let ringId = ringIdFromPost;
+      if (!ringId) {
+        // Get ring ID from slug
+        const ring = await prisma.ring.findUnique({
+          where: { slug: ringSlug },
+          select: { id: true },
         });
-        return;
+
+        if (!ring) {
+          reply.code(404).send({
+            error: 'Not found',
+            message: 'Ring not found',
+          });
+          return;
+        }
+        ringId = ring.id;
       }
 
       // Check if actor is blocked
-      const blocked = await isActorBlocked(request.actor.did, ring.id);
+      const blocked = await isActorBlocked(request.actor.did, ringId);
       if (blocked) {
         reply.code(403).send({
           error: 'Access denied',
