@@ -2323,29 +2323,22 @@ export async function ringsRoutes(fastify: FastifyInstance) {
             description: 'Update badge images and optionally regenerate existing badges for all ring members',
             security: [{ httpSignature: [] }],
             response: {
+                // Must mirror the handler's send shape exactly: Fastify
+                // serializes through this schema and silently DROPS
+                // undeclared properties (the previous ring-wrapper schema
+                // stripped success/badgeImageUrl/... from every response).
                 200: {
                     type: 'object',
                     properties: {
-                        ring: {
-                            type: 'object',
-                            properties: {
-                                slug: { type: 'string' },
-                                name: { type: 'string' },
-                                badgeImageUrl: { type: 'string', nullable: true },
-                                badgeImageHighResUrl: { type: 'string', nullable: true },
-                                updatedAt: { type: 'string', format: 'date-time' }
-                            }
-                        },
-                        badgesUpdated: {
-                            type: 'object',
-                            properties: {
-                                total: { type: 'number' },
-                                updated: { type: 'number' },
-                                failed: { type: 'number' }
-                            },
-                            nullable: true
-                        },
-                        message: { type: 'string' }
+                        success: { type: 'boolean' },
+                        message: { type: 'string' },
+                        badgeImageUrl: { type: 'string', nullable: true },
+                        badgeImageHighResUrl: { type: 'string', nullable: true },
+                        description: { type: 'string', nullable: true },
+                        criteria: { type: 'string', nullable: true },
+                        // Count of regenerated badges (only set when
+                        // updateExistingBadges was requested)
+                        badgesUpdated: { type: 'number', nullable: true }
                     }
                 }
             }

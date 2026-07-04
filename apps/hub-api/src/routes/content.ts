@@ -71,30 +71,44 @@ export async function contentRoutes(fastify: FastifyInstance) {
       description: 'Submit content to a ThreadRing. Includes validation for metadata fields like textPreview (max 300 chars).',
       security: [{ httpSignature: [] }],
       response: {
+        // Must mirror the handler's send shape exactly: Fastify serializes
+        // through this schema and silently DROPS undeclared properties (a
+        // flat schema here once reduced the whole body to `{}` on the wire).
         201: {
           type: 'object',
           properties: {
-            id: { type: 'string' },
-            ringSlug: { type: 'string' },
-            uri: { type: 'string' },
-            digest: { type: 'string' },
-            actorDid: { type: 'string' },
-            submittedBy: { type: 'string' },
-            submittedAt: { type: 'string', format: 'date-time' },
-            status: { type: 'string', enum: ['PENDING', 'ACCEPTED'] },
-            moderatedAt: { type: 'string', format: 'date-time' },
-            moderatedBy: { type: 'string' },
-            metadata: {
+            post: {
               type: 'object',
               properties: {
-                title: { type: 'string' },
-                textPreview: { type: 'string' },
-                excerpt: { type: 'string' },
-                tags: { type: 'array', items: { type: 'string' } },
-                publishedAt: { type: 'string', format: 'date-time' },
-                platform: { type: 'string' },
+                id: { type: 'string' },
+                ringSlug: { type: 'string' },
+                uri: { type: 'string' },
+                digest: { type: 'string' },
+                actorDid: { type: 'string' },
+                submittedBy: { type: 'string' },
+                submittedAt: { type: 'string', format: 'date-time' },
+                status: { type: 'string', enum: ['PENDING', 'ACCEPTED'] },
+                moderatedAt: { type: 'string', format: 'date-time', nullable: true },
+                moderatedBy: { type: 'string', nullable: true },
+                moderationNote: { type: 'string', nullable: true },
+                pinned: { type: 'boolean' },
+                metadata: {
+                  type: 'object',
+                  nullable: true,
+                  properties: {
+                    title: { type: 'string' },
+                    textPreview: { type: 'string' },
+                    excerpt: { type: 'string' },
+                    tags: { type: 'array', items: { type: 'string' } },
+                    publishedAt: { type: 'string', format: 'date-time' },
+                    platform: { type: 'string' },
+                  },
+                  additionalProperties: true,
+                },
               },
             },
+            message: { type: 'string' },
+            requiresApproval: { type: 'boolean' },
           },
         },
       },

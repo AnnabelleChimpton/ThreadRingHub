@@ -788,7 +788,10 @@ export async function membershipRoutes(fastify: FastifyInstance) {
               items: {
                 type: 'object',
                 properties: {
-                  badge: { type: 'object' }, // Full badge JSON-LD
+                  // Full badge JSON-LD. additionalProperties is required: a
+                  // bare `type: 'object'` schema makes Fastify's serializer
+                  // emit `{}` (it drops every undeclared property).
+                  badge: { type: 'object', additionalProperties: true },
                   ring: {
                     type: 'object',
                     properties: {
