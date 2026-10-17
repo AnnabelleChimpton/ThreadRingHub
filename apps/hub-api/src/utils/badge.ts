@@ -116,7 +116,7 @@ export async function generateBadge(
 /**
  * Generate cryptographic proof for a badge
  */
-async function generateBadgeProof(
+export async function generateBadgeProof(
   badge: Omit<ThreadRingBadge, 'proof'>,
   privateKey: crypto.KeyObject,
   issuerDid: string

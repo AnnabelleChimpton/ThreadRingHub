@@ -17,7 +17,6 @@ import { ringManagementRoutes } from './routes/ring-management';
 import { contentRoutes } from './routes/content';
 import { adminRoutes } from './routes/admin';
 import { profileUpdateRoutes } from './routes/profile-updates';
-import { resignBadges } from './utils/migration';
 
 async function buildApp() {
   const fastify = Fastify({
@@ -202,13 +201,6 @@ async function start() {
     // Connect to databases
     await connectDatabase();
     await connectRedis();
-
-    // Run badge re-signing migration on startup
-    try {
-      await resignBadges();
-    } catch (error) {
-      logger.error({ error }, 'Failed to resign badges');
-    }
 
     // Start server
     const { host, port } = config;
