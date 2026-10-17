@@ -216,32 +216,44 @@ async function resolveKeyFromDID(
     logger.info({ keyId, did, forceRefresh }, 'Resolving did:web DID for key');
 
     const didDocument = await resolveDID(did, forceRefresh);
-    if (didDocument) {
-      const publicKey = extractPublicKey(didDocument, keyId);
-      if (publicKey) {
-        // Upsert so both first-resolution and rotation updates land on the
-        // same row, with a refreshed expiry.
-        await prisma.httpSignature.upsert({
-          where: { keyId },
-          create: {
-            keyId,
-            publicKey,
-            actorDid: did,
-            trusted: false, // Keys start untrusted
-            expiresAt: new Date(Date.now() + KEY_CACHE_TTL_MS),
-          },
-          update: {
-            publicKey,
-            expiresAt: new Date(Date.now() + KEY_CACHE_TTL_MS),
-            lastUsed: new Date(),
-          },
-        });
-
-        logger.info({ keyId, did }, 'Cached public key from did:web DID resolution');
-        return publicKey;
-      }
+    if (!didDocument) {
+      // resolveDID/resolveWebDID log the URL and HTTP status or fetch error.
+      logger.warn({ keyId, did, reason: 'did_doc_unavailable' }, 'Key resolution failed: DID document could not be fetched');
+      return null;
     }
-    return null;
+    const publicKey = extractPublicKey(didDocument, keyId);
+    if (!publicKey) {
+      logger.warn(
+        { keyId, did, reason: 'key_not_in_did_doc', verificationMethods: didDocument.verificationMethod?.map((m) => m.id) },
+        'Key resolution failed: DID document has no matching verification method'
+      );
+      return null;
+    }
+    // Upsert so both first-resolution and rotation updates land on the
+    // same row, with a refreshed expiry. A failed cache write must not
+    // discard a key we just resolved from its authoritative DID document.
+    try {
+      await prisma.httpSignature.upsert({
+        where: { keyId },
+        create: {
+          keyId,
+          publicKey,
+          actorDid: did,
+          trusted: false, // Keys start untrusted
+          expiresAt: new Date(Date.now() + KEY_CACHE_TTL_MS),
+        },
+        update: {
+          publicKey,
+          expiresAt: new Date(Date.now() + KEY_CACHE_TTL_MS),
+          lastUsed: new Date(),
+        },
+      });
+
+      logger.info({ keyId, did }, 'Cached public key from did:web DID resolution');
+    } catch (error) {
+      logger.error({ error, keyId, did, reason: 'cache_write_failed' }, 'Resolved key but could not cache it — using it uncached');
+    }
+    return publicKey;
   }
 
   if (did.startsWith('did:key:')) {
@@ -332,10 +344,17 @@ function validateDigest(request: FastifyRequest): boolean {
  */
 async function fetchPublicKey(keyId: string): Promise<string | null> {
   try {
-    // First, check if we have it cached in the database
-    const cached = await prisma.httpSignature.findUnique({
-      where: { keyId },
-    });
+    // First, check if we have it cached in the database. A failed lookup (e.g.
+    // schema drift on HttpSignature) is logged and falls through to DID
+    // resolution instead of reporting the key as unknown.
+    let cached: Awaited<ReturnType<typeof prisma.httpSignature.findUnique>> = null;
+    try {
+      cached = await prisma.httpSignature.findUnique({
+        where: { keyId },
+      });
+    } catch (error) {
+      logger.error({ error, keyId, reason: 'cache_lookup_failed' }, 'HttpSignature lookup failed — resolving from DID document');
+    }
 
     if (cached) {
       const expired = cached.expiresAt != null && cached.expiresAt.getTime() < Date.now();
@@ -355,10 +374,14 @@ async function fetchPublicKey(keyId: string): Promise<string | null> {
       }
 
       // Update last used timestamp (best-effort)
-      await prisma.httpSignature.update({
-        where: { keyId },
-        data: { lastUsed: new Date() },
-      });
+      try {
+        await prisma.httpSignature.update({
+          where: { keyId },
+          data: { lastUsed: new Date() },
+        });
+      } catch (error) {
+        logger.warn({ error, keyId }, 'Could not update HttpSignature.lastUsed');
+      }
 
       return cached.publicKey;
     }
@@ -369,10 +392,10 @@ async function fetchPublicKey(keyId: string): Promise<string | null> {
       return resolved;
     }
 
-    logger.warn({ keyId }, 'Failed to resolve public key');
+    logger.warn({ keyId, reason: 'not_cached_and_unresolvable' }, 'Unknown key: not cached and DID resolution failed (see the preceding reason log)');
     return null;
   } catch (error) {
-    logger.error({ error, keyId }, 'Failed to fetch public key');
+    logger.error({ error, keyId, reason: 'unexpected_error' }, 'Failed to fetch public key');
     return null;
   }
 }

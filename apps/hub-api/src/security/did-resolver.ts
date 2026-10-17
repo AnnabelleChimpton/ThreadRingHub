@@ -229,7 +229,15 @@ async function resolveWebDID(did: string): Promise<DIDDocument | null> {
       });
 
       if (!response.ok) {
-        logger.warn({ url, status: response.status }, 'Failed to fetch DID document');
+        // server/cf-mitigated/cf-ray identify a Cloudflare block or challenge.
+        logger.warn({
+          url,
+          status: response.status,
+          server: response.headers.get('server'),
+          cfMitigated: response.headers.get('cf-mitigated'),
+          cfRay: response.headers.get('cf-ray'),
+          contentType: response.headers.get('content-type'),
+        }, 'Failed to fetch DID document');
         // Legacy local-dev fallback: previously every localhost DID
         // short-circuited to a mock document without any fetch. Keep the mock
         // for loopback DIDs nothing is serving, so dev setups keep working.
