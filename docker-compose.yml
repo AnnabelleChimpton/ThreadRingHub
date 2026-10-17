@@ -80,7 +80,13 @@ services:
       ACTIVITYPUB_ENABLED: ${ACTIVITYPUB_ENABLED:-false}
       # Security settings (relaxed for development)
       RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
-      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-1000}
+      # Per-IP requests/minute. Read by the hub since 2026-10 (500 = the old hardcoded value).
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-500}
+      # Comma-separated server IPs (e.g. ThreadStead's VPS) that get RATE_LIMIT_TRUSTED_MAX instead.
+      RATE_LIMIT_TRUSTED_IPS: ${RATE_LIMIT_TRUSTED_IPS:-}
+      RATE_LIMIT_TRUSTED_MAX: ${RATE_LIMIT_TRUSTED_MAX:-5000}
+      # Fastify trustProxy: true (default, trusts any X-Forwarded-For), a hop count, or proxy IPs/CIDRs.
+      TRUST_PROXY: ${TRUST_PROXY:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
     ports:
       # Localhost-only: the reverse proxy on this host is the sole public entry

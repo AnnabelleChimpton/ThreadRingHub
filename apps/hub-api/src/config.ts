@@ -29,7 +29,27 @@ const configSchema = z.object({
     rootSlug: z.string().default('spool'),
   }),
   hubUrl: z.string().url().default('https://ringhub.example.com'),
+  // Fastify `trustProxy`: true (trust every X-Forwarded-For hop — the old
+  // hardcoded value), a hop count, or comma-separated proxy IPs/CIDRs. Only
+  // with a specific value is request.ip safe from client-supplied XFF.
+  trustProxy: z.union([z.boolean(), z.number().int().min(0), z.string().min(1)]),
+  rateLimit: z.object({
+    enabled: z.boolean(),
+    max: z.number().int().min(1), // per IP per minute
+    // Server-to-server callers (e.g. ThreadStead's egress IP) whose many users
+    // share one IP; they get trustedMax instead of max.
+    trustedIps: z.array(z.string()),
+    trustedMax: z.number().int().min(1),
+  }),
 });
+
+function parseTrustProxy(raw: string | undefined): boolean | number | string {
+  const value = raw?.trim();
+  if (!value || value === 'true') return true;
+  if (value === 'false') return false;
+  if (/^\d+$/.test(value)) return parseInt(value, 10);
+  return value;
+}
 
 function loadConfig() {
   const env = {
@@ -57,6 +77,13 @@ function loadConfig() {
       rootSlug: process.env.ROOT_RING_SLUG || 'spool',
     },
     hubUrl: process.env.RING_HUB_URL || 'https://ringhub.example.com',
+    trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
+    rateLimit: {
+      enabled: process.env.RATE_LIMIT_ENABLED !== 'false',
+      max: parseInt(process.env.RATE_LIMIT_MAX || '500', 10),
+      trustedIps: (process.env.RATE_LIMIT_TRUSTED_IPS || '').split(',').map((ip) => ip.trim()).filter(Boolean),
+      trustedMax: parseInt(process.env.RATE_LIMIT_TRUSTED_MAX || '5000', 10),
+    },
   };
 
   return configSchema.parse(env);

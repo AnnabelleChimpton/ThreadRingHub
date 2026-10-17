@@ -24,7 +24,7 @@ async function buildApp() {
     requestIdHeader: 'x-request-id',
     requestIdLogLabel: 'requestId',
     disableRequestLogging: false,
-    trustProxy: true,
+    trustProxy: config.trustProxy,
   });
 
   // Capture the RAW request body bytes for JSON requests so HTTP-signature
@@ -60,10 +60,22 @@ async function buildApp() {
     origin: config.cors.origins,
     credentials: true,
   });
-  await fastify.register(rateLimit, {
-    max: 500, // Increased from 100 to accommodate authenticated API clients
-    timeWindow: '1 minute',
-  });
+  // Keyed by request.ip. Not keyed by actor DID: this runs before signature
+  // verification, so a DID here would be an unverified claim anyone could use
+  // to mint fresh buckets or to exhaust a trusted server's bucket.
+  if (config.rateLimit.enabled) {
+    // With trustProxy=true, request.ip is the client-supplied leftmost
+    // X-Forwarded-For, so anyone could claim a trusted IP (and drain its
+    // bucket). Trusted IPs only take effect once TRUST_PROXY is pinned.
+    const trustedIps = new Set(config.trustProxy === true ? [] : config.rateLimit.trustedIps);
+    if (config.trustProxy === true && config.rateLimit.trustedIps.length > 0) {
+      logger.error('RATE_LIMIT_TRUSTED_IPS ignored: set TRUST_PROXY to the reverse proxy hop count or IP first');
+    }
+    await fastify.register(rateLimit, {
+      max: (_request, key) => (trustedIps.has(key) ? config.rateLimit.trustedMax : config.rateLimit.max),
+      timeWindow: '1 minute',
+    });
+  }
 
   // Swagger/OpenAPI documentation
   await fastify.register(swagger, {
