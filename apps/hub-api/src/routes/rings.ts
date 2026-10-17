@@ -325,12 +325,13 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                                 properties: {
                                     ringSlug: { type: 'string' },
                                     ringName: { type: 'string' },
-                                    ringDescription: { type: 'string' },
+                                    // nullable: without it fast-json-stringify coerces null to ""
+                                    ringDescription: { type: 'string', nullable: true },
                                     ringVisibility: { type: 'string' },
                                     status: { type: 'string' },
-                                    role: { type: 'string' },
-                                    joinedAt: { type: 'string' },
-                                    badgeId: { type: 'string' },
+                                    role: { type: 'string', nullable: true },
+                                    joinedAt: { type: 'string', nullable: true },
+                                    badgeId: { type: 'string', nullable: true },
                                 },
                             },
                         },
@@ -458,7 +459,8 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                                     submittedAt: { type: 'string' },
                                     submittedBy: { type: 'string' },
                                     status: { type: 'string' },
-                                    metadata: { type: 'object', nullable: true },
+                                    // additionalProperties: a bare object schema serializes to `{}`
+                                    metadata: { type: 'object', nullable: true, additionalProperties: true },
                                     pinned: { type: 'boolean' },
                                     isNotification: { type: 'boolean' },
                                     notificationType: { type: 'string', nullable: true },
@@ -670,7 +672,8 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                                     submittedAt: { type: 'string' },
                                     submittedBy: { type: 'string' },
                                     status: { type: 'string' },
-                                    metadata: { type: 'object', nullable: true },
+                                    // additionalProperties: a bare object schema serializes to `{}`
+                                    metadata: { type: 'object', nullable: true, additionalProperties: true },
                                     pinned: { type: 'boolean' },
                                     isNotification: { type: 'boolean' },
                                     notificationType: { type: 'string', nullable: true },
