@@ -5,8 +5,8 @@
  * suite) needs to exercise the core flows against a freshly-pushed schema:
  *
  *  - the root ring ("spool") so genealogy/config defaults hold
- *  - one test ring (open join, members-only posting) with a "member" role,
- *    since /trp/join 403s on rings without roles
+ *  - one test ring (open join, members-only posting) with the default
+ *    owner/moderator/member roles, since /trp/join 403s on rings without roles
  *  - a pre-verified Actor + cached HttpSignature row for the test client's
  *    signing key, so requests authenticate without any did:web resolution
  *
@@ -18,6 +18,7 @@
  * Idempotent: safe to re-run against the same database.
  */
 import { PrismaClient } from '@prisma/client';
+import { DEFAULT_ROLES } from '../src/utils/default-roles';
 
 const prisma = new PrismaClient();
 
@@ -62,10 +63,9 @@ async function main() {
     },
   });
 
-  for (const [name, permissions] of [
-    ['member', ['post']],
-    ['owner', ['post', 'moderate', 'manage_ring', 'manage_members']],
-  ] as const) {
+  // Same roles + permission names as rings created through the API, so the
+  // suite exercises production permissions.
+  for (const { name, permissions } of DEFAULT_ROLES) {
     await prisma.ringRole.upsert({
       where: { ringId_name: { ringId: ring.id, name } },
       update: {},

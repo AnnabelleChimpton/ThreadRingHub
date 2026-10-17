@@ -24,6 +24,7 @@ import {
 } from '../schemas/ring-schemas';
 import { config } from '../config';
 import { generateBadge } from '../utils/badge';
+import { createDefaultRoles } from '../utils/default-roles';
 import { RING_HUB_PRIVATE_KEY, ephemeralBadgeIssuanceBlock } from '../utils/signing-key';
 
 /**
@@ -1249,30 +1250,8 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                 },
             });
 
-            // Create default roles
-            const [ownerRole] = await Promise.all([
-                prisma.ringRole.create({
-                    data: {
-                        ringId: ring.id,
-                        name: 'owner',
-                        permissions: [
-                            'manage_ring',
-                            'manage_members',
-                            'manage_roles',
-                            'moderate_posts',
-                            'update_ring_info',
-                            'delete_ring',
-                        ],
-                    },
-                }),
-                prisma.ringRole.create({
-                    data: {
-                        ringId: ring.id,
-                        name: 'member',
-                        permissions: ['submit_posts', 'view_content'],
-                    },
-                }),
-            ]);
+            // Create default roles (owner, moderator, member)
+            const ownerRole = await createDefaultRoles(prisma, ring.id);
 
             // Add owner as member with owner role
             await prisma.membership.create({
@@ -1692,30 +1671,8 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                 },
             });
 
-            // Create default roles (copy from parent if desired)
-            const [ownerRole] = await Promise.all([
-                prisma.ringRole.create({
-                    data: {
-                        ringId: ring.id,
-                        name: 'owner',
-                        permissions: [
-                            'manage_ring',
-                            'manage_members',
-                            'manage_roles',
-                            'moderate_posts',
-                            'update_ring_info',
-                            'delete_ring',
-                        ],
-                    },
-                }),
-                prisma.ringRole.create({
-                    data: {
-                        ringId: ring.id,
-                        name: 'member',
-                        permissions: ['submit_posts', 'view_content'],
-                    },
-                }),
-            ]);
+            // Create default roles (owner, moderator, member)
+            const ownerRole = await createDefaultRoles(prisma, ring.id);
 
             // Add owner as member
             const membership = await prisma.membership.create({
