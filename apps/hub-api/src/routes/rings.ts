@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { prisma } from '../database/prisma';
-import { Prisma } from '@prisma/client';
+import { Prisma, RingVisibility } from '@prisma/client';
 import { logger } from '../utils/logger';
 import {
     authenticateActor,
@@ -26,6 +26,7 @@ import { config } from '../config';
 import { generateBadge } from '../utils/badge';
 import { createDefaultRoles } from '../utils/default-roles';
 import { RING_HUB_PRIVATE_KEY, ephemeralBadgeIssuanceBlock } from '../utils/signing-key';
+import { selectRingPage } from '../services/ring-search';
 
 /**
  * Generate a unique slug from ring name
@@ -808,13 +809,15 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                     visibility: { type: 'string', enum: ['PUBLIC', 'UNLISTED', 'PRIVATE'] },
                     limit: { type: 'number', minimum: 1, maximum: 100, default: 20 },
                     offset: { type: 'number', minimum: 0, default: 0 },
-                    sort: { type: 'string', enum: ['created', 'updated', 'name', 'members'], default: 'created' },
+                    // No schema default: without `sort`, a search is ordered
+                    // by relevance and a plain listing by creation date.
+                    sort: { type: 'string', enum: ['created', 'updated', 'name', 'members', 'relevance'] },
                     order: { type: 'string', enum: ['asc', 'desc'], default: 'desc' },
                 },
             },
             tags: ['rings'],
             summary: 'List and search rings',
-            description: 'Lists rings with optional search and filtering. If authenticated, includes current user membership status and role for each ring.',
+            description: 'Lists rings with optional search and filtering. If authenticated, includes current user membership status and role for each ring. `search` is full-text (quotes, -word, or) plus typo and partial-word matching on names; with a search, each ring carries `relevance: { textRank, trigram }` and the default order is best match first.',
             response: {
                 200: {
                     type: 'object',
@@ -832,64 +835,36 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         try {
             const { search, visibility, limit, offset, sort, order, memberDid } = request.query;
 
-            const where: any = {};
-
-            // Search functionality
-            if (search) {
-                where.OR = [
-                    { name: { contains: search, mode: 'insensitive' } },
-                    { description: { contains: search, mode: 'insensitive' } },
-                    { shortCode: { contains: search, mode: 'insensitive' } },
-                ];
-            }
-
             // Only show public rings to unauthenticated users
             // If viewing someone else's rings, also restrict to PUBLIC
+            let visibleAs: RingVisibility | undefined;
             if (!request.actor || (memberDid && request.actor.did !== memberDid)) {
-                where.visibility = 'PUBLIC';
+                visibleAs = 'PUBLIC';
             } else if (visibility) {
-                where.visibility = visibility;
+                visibleAs = visibility;
             }
 
-            // Filter by membership if requested
-            if (memberDid) {
-                where.memberships = {
-                    some: {
-                        actorDid: memberDid,
-                        status: 'ACTIVE'
-                    }
-                };
-            }
-
-            // Build order clause
-            const orderBy: any = {};
-            switch (sort) {
-                case 'name':
-                    orderBy.name = order;
-                    break;
-                case 'updated':
-                    orderBy.updatedAt = order;
-                    break;
-                case 'members':
-                    // This would require a more complex query in production
-                    orderBy.createdAt = order;
-                    break;
-                default:
-                    orderBy.createdAt = order;
-            }
-
-            const [rings, total] = await Promise.all([
-                prisma.ring.findMany({
-                    where,
-                    take: limit,
-                    skip: offset,
-                    orderBy,
-                }),
-                prisma.ring.count({ where }),
-            ]);
+            const page = await selectRingPage({
+                search,
+                visibility: visibleAs,
+                memberDid,
+                sort: sort ?? (search?.trim() ? 'relevance' : 'created'),
+                order: order ?? 'desc',
+                limit,
+                offset,
+            });
+            const total = page.total;
+            const byId = new Map(
+                (await prisma.ring.findMany({ where: { id: { in: page.ids } } })).map(ring => [ring.id, ring])
+            );
+            const rings = page.ids.map(id => byId.get(id)).filter(ring => ring !== undefined);
 
             const ringResponses = await Promise.all(
-                rings.map(ring => buildRingResponse(ring, false, false, request.actor?.did))
+                rings.map(async ring => {
+                    const response = await buildRingResponse(ring, false, false, request.actor?.did);
+                    const relevance = page.relevance.get(ring.id);
+                    return relevance ? { ...response, relevance } : response;
+                })
             );
 
             const response: RingListResponse = {

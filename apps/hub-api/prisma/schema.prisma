@@ -52,12 +52,18 @@ model Ring {
   challenges  Challenge[]
   blocks      Block[]
   invitations Invitation[]
-  
+
+  // Full-text search vector (name A, shortCode A, description B). Written by a
+  // trigger, never by the app: see migrations/20261018000000_add_ring_search_fts.
+  searchTsv   Unsupported("tsvector")? @map("search_tsv")
+
   @@index([slug])
   @@index([ownerDid])
   @@index([parentId])
   @@index([visibility])
   @@index([createdAt])
+  @@index([searchTsv], type: Gin, map: "Ring_search_tsv_idx")
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Ring_name_trgm_idx")
 }
 
 // Ring visibility levels

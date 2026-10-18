@@ -52,7 +52,8 @@ export const RingQuerySchema = z.object({
   visibility: RingVisibilitySchema.optional(),
   limit: z.coerce.number().min(1).max(100).default(20),
   offset: z.coerce.number().min(0).default(0),
-  sort: z.enum(['created', 'updated', 'name', 'members']).default('created'),
+  // Unset: relevance when searching, otherwise created (rings.ts).
+  sort: z.enum(['created', 'updated', 'name', 'members', 'relevance']).optional(),
   order: z.enum(['asc', 'desc']).default('desc'),
   memberDid: z.string().optional(),
 });
@@ -238,6 +239,11 @@ export const RingResponseSchema = z.object({
     name: z.string(),
     memberCount: z.number(),
   })).optional(),
+  // Search signals (only on GET /trp/rings with a search; services/ring-search.ts)
+  relevance: z.object({
+    textRank: z.number(),
+    trigram: z.number(),
+  }).optional(),
   // Current user's membership info (only included if authenticated)
   currentUserMembership: z.object({
     status: z.enum(['PENDING', 'ACTIVE', 'SUSPENDED', 'REVOKED']),
