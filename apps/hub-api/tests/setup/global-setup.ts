@@ -1,7 +1,8 @@
 /**
  * Fresh database for the route tests: the real migration history
  * (`prisma migrate deploy`, as ./scripts/deploy.sh runs it), then the ring
- * search migration a second time to prove it is safe to re-run.
+ * search and Invitation migrations a second time to prove they are safe to
+ * re-run (both already exist on production in some form).
  */
 import { execSync } from 'child_process';
 import path from 'path';
@@ -25,4 +26,5 @@ export default function globalSetup(): void {
   run(`psql "${admin}" -v ON_ERROR_STOP=1 -qc 'DROP DATABASE IF EXISTS "${dbName}"' -c 'CREATE DATABASE "${dbName}"'`);
   run('npx prisma migrate deploy');
   run('npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261018000000_add_ring_search_fts/migration.sql');
+  run('npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261018120000_add_invitation/migration.sql');
 }
