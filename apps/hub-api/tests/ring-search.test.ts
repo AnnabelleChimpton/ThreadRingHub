@@ -168,11 +168,12 @@ describe('relevance', () => {
         const potters = await ring('potters', 'Potters Guild', {});
         const clay = await ring('clay-folk', 'Clay Folk', { description: 'we pot things', visibility: 'UNLISTED' });
         try {
-            expect(await slugs({ search: 'pot' }, ALICE)).toEqual(['potters', 'clay-folk']);
-            expect(await slugs({ search: 'pott guil' }, ALICE)).toEqual(['potters']);
+            // Signed as the owner, who can see the unlisted ring.
+            expect(await slugs({ search: 'pot' }, OWNER)).toEqual(['potters', 'clay-folk']);
+            expect(await slugs({ search: 'pott guil' }, OWNER)).toEqual(['potters']);
             // Prefixes reach descriptions too, but a quoted word is exact.
-            expect(await slugs({ search: 'thin' }, ALICE)).toEqual(['clay-folk']);
-            expect(await slugs({ search: '"thin"' }, ALICE)).toEqual([]);
+            expect(await slugs({ search: 'thin' }, OWNER)).toEqual(['clay-folk']);
+            expect(await slugs({ search: '"thin"' }, OWNER)).toEqual([]);
         } finally {
             await prisma.ring.deleteMany({ where: { id: { in: [potters.id, clay.id] } } });
         }
@@ -218,16 +219,59 @@ describe('sorting', () => {
     });
 });
 
-describe('visibility (unchanged rules)', () => {
+describe('visibility', () => {
+    // secret-garden is PRIVATE and garden-shed UNLISTED, both owned by OWNER.
+    const BOB = 'did:web:bob.test';
+    const CAROL = 'did:web:carol.test';
+    const DAVE = 'did:web:dave.test';
+
+    beforeAll(async () => {
+        const secret = await prisma.ring.findUniqueOrThrow({ where: { slug: 'secret-garden' } });
+        await prisma.membership.create({ data: { ringId: secret.id, actorDid: CAROL, status: 'ACTIVE' } });
+        await prisma.membership.create({ data: { ringId: secret.id, actorDid: DAVE, status: 'PENDING' } });
+    });
+
+    afterAll(async () => {
+        await prisma.membership.deleteMany({ where: { actorDid: { in: [CAROL, DAVE] } } });
+    });
+
     it('anonymous viewers only see public rings', async () => {
         expect(await slugs({ search: 'garden' })).toEqual([]);
         expect(await slugs({ search: 'garden', visibility: 'PRIVATE' })).toEqual([]);
     });
 
-    it('signed requests see every visibility, or the one asked for', async () => {
-        expect(new Set(await slugs({ search: 'garden' }, ALICE))).toEqual(new Set(['secret-garden', 'garden-shed']));
-        expect(await slugs({ search: 'garden', visibility: 'UNLISTED' }, ALICE)).toEqual(['garden-shed']);
-        expect(await slugs({ search: 'garden -secret' }, ALICE)).toEqual(['garden-shed']);
+    it("a signature alone doesn't reveal private or unlisted rings", async () => {
+        expect(await slugs({ search: 'garden' }, BOB)).toEqual([]);
+        expect(await slugs({ search: 'garden', visibility: 'PRIVATE' }, BOB)).toEqual([]);
+        expect(await slugs({ search: 'garden', visibility: 'UNLISTED' }, BOB)).toEqual([]);
+        const { body } = await list({ search: 'garden' }, BOB);
+        expect(body.total).toBe(0);
+    });
+
+    it('a plain signed listing is public rings only, with the total to match', async () => {
+        const anon = await list({ limit: '100' });
+        const bob = await list({ limit: '100' }, BOB);
+        expect(bob.body.rings.map((r: any) => r.slug)).toEqual(anon.body.rings.map((r: any) => r.slug));
+        expect(bob.body.total).toBe(anon.body.total);
+        expect(bob.body.rings.every((r: any) => r.visibility === 'PUBLIC')).toBe(true);
+    });
+
+    it('active members see their private ring; pending members do not', async () => {
+        expect(await slugs({ search: 'garden' }, CAROL)).toEqual(['secret-garden']);
+        expect(await slugs({ search: 'garden', visibility: 'PRIVATE' }, CAROL)).toEqual(['secret-garden']);
+        expect(await slugs({ search: 'garden' }, DAVE)).toEqual([]);
+    });
+
+    it('owners see their unlisted and private rings, or the one asked for', async () => {
+        expect(new Set(await slugs({ search: 'garden' }, OWNER))).toEqual(new Set(['secret-garden', 'garden-shed']));
+        expect(await slugs({ search: 'garden', visibility: 'UNLISTED' }, OWNER)).toEqual(['garden-shed']);
+        expect(await slugs({ search: 'garden -secret' }, OWNER)).toEqual(['garden-shed']);
+    });
+
+    it('your own memberships include your private rings', async () => {
+        expect(await slugs({ memberDid: CAROL }, CAROL)).toEqual(['secret-garden']);
+        expect(await slugs({ memberDid: CAROL }, BOB)).toEqual([]);
+        expect(await slugs({ memberDid: CAROL })).toEqual([]);
     });
 
     it("someone else's memberships: public rings only", async () => {

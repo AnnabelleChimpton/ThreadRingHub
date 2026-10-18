@@ -36,6 +36,12 @@ export interface RingListQuery {
     visibility?: RingVisibility | undefined;
     /** Only rings this DID is an ACTIVE member of. */
     memberDid?: string | undefined;
+    /**
+     * The signed-in viewer: public rings, plus unlisted and private rings
+     * they own or are an ACTIVE member of. Unset means no membership check
+     * (the route has already limited what this viewer may see).
+     */
+    viewerDid?: string | undefined;
     sort: RingListSort;
     order: 'asc' | 'desc';
     limit: number;
@@ -220,6 +226,12 @@ export async function selectRingPage(q: RingListQuery): Promise<RingListPage> {
 async function runPage(q: RingListQuery, search: SearchSql): Promise<RingListPage> {
     const filters: Prisma.Sql[] = [...search.filters];
     if (q.visibility) filters.push(Prisma.sql`r.visibility = ${q.visibility}::"RingVisibility"`);
+    if (q.viewerDid) {
+        filters.push(Prisma.sql`(r.visibility = 'PUBLIC'::"RingVisibility" OR r."ownerDid" = ${q.viewerDid} OR EXISTS (
+            SELECT 1 FROM "Membership" vm
+            WHERE vm."ringId" = r.id AND vm."actorDid" = ${q.viewerDid} AND vm.status = 'ACTIVE'
+        ))`);
+    }
     if (q.memberDid) {
         filters.push(Prisma.sql`EXISTS (
             SELECT 1 FROM "Membership" mm

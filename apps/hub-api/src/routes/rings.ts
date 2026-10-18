@@ -835,18 +835,25 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         try {
             const { search, visibility, limit, offset, sort, order, memberDid } = request.query;
 
-            // Only show public rings to unauthenticated users
-            // If viewing someone else's rings, also restrict to PUBLIC
+            // Anonymous viewers, and anyone listing someone else's rings, see
+            // public rings only. A signed-in viewer listing their own rings
+            // (memberDid = their DID) sees all of them. Any other signed
+            // listing or search is public rings plus the unlisted and private
+            // rings the viewer owns or belongs to: a signature proves who is
+            // asking, not that they may see every ring.
             let visibleAs: RingVisibility | undefined;
+            let viewerDid: string | undefined;
             if (!request.actor || (memberDid && request.actor.did !== memberDid)) {
                 visibleAs = 'PUBLIC';
-            } else if (visibility) {
+            } else {
                 visibleAs = visibility;
+                if (!memberDid) viewerDid = request.actor.did;
             }
 
             const page = await selectRingPage({
                 search,
                 visibility: visibleAs,
+                viewerDid,
                 memberDid,
                 sort: sort ?? (search?.trim() ? 'relevance' : 'created'),
                 order: order ?? 'desc',
