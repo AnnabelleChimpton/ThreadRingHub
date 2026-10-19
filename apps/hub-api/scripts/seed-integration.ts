@@ -14,6 +14,8 @@
  *   TEST_ACTOR_DID          e.g. did:web:threadstead.test:users:itest1
  *   TEST_ACTOR_PUBKEY_B64   base64 of the raw 32-byte Ed25519 public key
  *   TEST_RING_SLUG          default "itest-ring"
+ *   TEST_ACTOR_IS_ADMIN     "1" makes the actor a hub admin (Actor.isAdmin),
+ *                           the way make-user-admin.sql marks one in production
  *
  * Idempotent: safe to re-run against the same database.
  */
@@ -26,6 +28,7 @@ async function main() {
   const actorDid = process.env.TEST_ACTOR_DID;
   const publicKeyB64 = process.env.TEST_ACTOR_PUBKEY_B64;
   const ringSlug = process.env.TEST_RING_SLUG || 'itest-ring';
+  const isAdmin = process.env.TEST_ACTOR_IS_ADMIN === '1';
 
   if (!actorDid || !publicKeyB64) {
     throw new Error('TEST_ACTOR_DID and TEST_ACTOR_PUBKEY_B64 are required');
@@ -75,7 +78,7 @@ async function main() {
 
   await prisma.actor.upsert({
     where: { did: actorDid },
-    update: { verified: true },
+    update: { verified: true, isAdmin },
     create: {
       did: actorDid,
       name: 'Integration Test Actor',
@@ -83,6 +86,7 @@ async function main() {
       publicKey: publicKeyB64,
       verified: true,
       trusted: false,
+      isAdmin,
     },
   });
 

@@ -558,6 +558,16 @@ export async function membershipRoutes(fastify: FastifyInstance) {
         return;
       }
 
+      // The owner role follows Ring.ownerDid. Handing it out here would leave
+      // a second "owner" the rest of the hub doesn't treat as one.
+      if (ring.ownerDid !== did && roleName === 'owner') {
+        reply.code(400).send({
+          error: 'Cannot assign owner',
+          message: 'A ring has one owner. Use POST /trp/rings/:slug/transfer-ownership instead.',
+        });
+        return;
+      }
+
       // Update membership
       const oldRole = membership.role?.name;
       await prisma.membership.update({
