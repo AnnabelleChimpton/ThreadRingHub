@@ -59,16 +59,15 @@ export async function ringManagementRoutes(fastify: FastifyInstance) {
                 });
             }
 
-            // Check for existing pending invitation
-            const existingInvite = await prisma.invitation.findFirst({
-                where: {
-                    ringId: ring.id,
-                    inviteeDid,
-                    status: 'PENDING'
-                }
+            // One invitation row per (ring, invitee). Only a PENDING one that
+            // hasn't run out blocks a new invite; nothing marks rows EXPIRED,
+            // so an old expiry counts as gone, same as /trp/join treats it.
+            const now = new Date();
+            const existingInvite = await prisma.invitation.findUnique({
+                where: { ringId_inviteeDid: { ringId: ring.id, inviteeDid } }
             });
 
-            if (existingInvite) {
+            if (existingInvite && existingInvite.status === 'PENDING' && existingInvite.expiresAt > now) {
                 return reply.code(400).send({
                     error: 'Invitation exists',
                     message: 'User already has a pending invitation to this ring'
@@ -78,13 +77,23 @@ export async function ringManagementRoutes(fastify: FastifyInstance) {
             // Create invitation with expiry (default 7 days)
             const expiryDate = expiresAt ? new Date(expiresAt) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-            const invitation = await prisma.invitation.create({
-                data: {
+            // An expired, accepted (the person since left), declined or revoked
+            // row is reused as a fresh invitation.
+            const invitation = await prisma.invitation.upsert({
+                where: { ringId_inviteeDid: { ringId: ring.id, inviteeDid } },
+                create: {
                     ringId: ring.id,
                     inviteeDid,
                     inviterDid,
                     status: 'PENDING',
                     expiresAt: expiryDate
+                },
+                update: {
+                    inviterDid,
+                    status: 'PENDING',
+                    expiresAt: expiryDate,
+                    createdAt: now,
+                    respondedAt: null
                 }
             });
 
