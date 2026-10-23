@@ -187,6 +187,20 @@ async function buildRingResponse(
     return response;
 }
 
+/**
+ * The fork notices among the PostRefs a feed query matches, to leave out by
+ * id. A JSON-path `not: 'fork_notification'` also drops every row whose
+ * metadata has no `type` (NULL in SQL fails any comparison), which is most
+ * posts.
+ */
+async function forkNoticeIds(where: Prisma.PostRefWhereInput): Promise<string[]> {
+    const notices = await prisma.postRef.findMany({
+        where: { AND: [where, { metadata: { path: ['type'], equals: 'fork_notification' } }] },
+        select: { id: true },
+    });
+    return notices.map((notice) => notice.id);
+}
+
 export async function ringsRoutes(fastify: FastifyInstance) {
     // Add security middleware to all protected routes
     fastify.addHook('preHandler', auditLogger);
@@ -553,15 +567,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
 
             // Exclude notifications if requested
             if (!includeNotifications) {
-                where.OR = [
-                    { metadata: { equals: Prisma.JsonNull } },
-                    {
-                        metadata: {
-                            path: ['type'],
-                            not: 'fork_notification'
-                        }
-                    }
-                ];
+                where.id = { notIn: await forkNoticeIds(where) };
             }
 
             // Get posts with ring info
@@ -724,15 +730,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
 
             // Exclude notifications if requested
             if (!includeNotifications) {
-                where.OR = [
-                    { metadata: { equals: Prisma.JsonNull } },
-                    {
-                        metadata: {
-                            path: ['type'],
-                            not: 'fork_notification'
-                        }
-                    }
-                ];
+                where.id = { notIn: await forkNoticeIds(where) };
             }
 
             // Get trending posts (for now, just recent posts from public rings)
