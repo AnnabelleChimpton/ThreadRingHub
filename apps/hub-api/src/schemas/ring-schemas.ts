@@ -9,6 +9,9 @@ export const JoinPolicySchema = z.enum(['OPEN', 'APPLICATION', 'INVITATION', 'CL
 // Post policy options
 export const PostPolicySchema = z.enum(['OPEN', 'MEMBERS', 'CURATED', 'CLOSED']);
 
+// A ring's theme colour: #rgb or #rrggbb. It reaches pages' CSS, so nothing else.
+export const THEME_COLOR = '^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$';
+
 // Ring creation schema
 export const CreateRingSchema = z.object({
   name: z.string().min(1).max(100),
@@ -21,7 +24,7 @@ export const CreateRingSchema = z.object({
   parentSlug: z.string().optional(), // For creating forks
   curatorNote: z.string().max(1000).optional(),
   bannerUrl: z.string().url().optional(),
-  themeColor: z.string().optional(),
+  themeColor: z.string().regex(new RegExp(THEME_COLOR)).optional(),
   badgeImageUrl: z.string().url().optional(), // 88x31 badge image URL
   badgeImageHighResUrl: z.string().url().optional(), // 352x124 high-res badge image URL
   metadata: z.record(z.any()).optional(),
@@ -31,15 +34,16 @@ export const CreateRingSchema = z.object({
 // Ring update schema
 export const UpdateRingSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  description: z.string().max(500).optional(),
+  description: z.string().max(500).nullable().optional(),
   shortCode: z.string().min(2).max(10).regex(/^[a-zA-Z0-9-]+$/).optional(),
   visibility: RingVisibilitySchema.optional(),
   joinPolicy: JoinPolicySchema.optional(),
   postPolicy: PostPolicySchema.optional(),
   parentSlug: z.string().optional(), // For updating parent threadring
-  curatorNote: z.string().max(1000).optional(),
-  bannerUrl: z.string().url().optional(),
-  themeColor: z.string().optional(),
+  // null clears these; an omitted field is left as it is
+  curatorNote: z.string().max(1000).nullable().optional(),
+  bannerUrl: z.string().url().nullable().optional(),
+  themeColor: z.string().regex(new RegExp(THEME_COLOR)).nullable().optional(),
   badgeImageUrl: z.string().url().optional(), // 88x31 badge image URL
   badgeImageHighResUrl: z.string().url().optional(), // 352x124 high-res badge image URL
   metadata: z.record(z.any()).optional(),

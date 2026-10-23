@@ -22,6 +22,7 @@ import {
     type RingResponse,
     type RingListResponse,
     type MembersListResponse,
+    THEME_COLOR,
 } from '../schemas/ring-schemas';
 import { config } from '../config';
 import { generateBadge } from '../utils/badge';
@@ -1135,7 +1136,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                     parentSlug: { type: 'string' },
                     curatorNote: { type: 'string', maxLength: 1000 },
                     bannerUrl: { type: 'string', format: 'uri' },
-                    themeColor: { type: 'string' },
+                    themeColor: { type: 'string', pattern: THEME_COLOR },
                     badgeImageUrl: { type: 'string', format: 'uri' },
                     badgeImageHighResUrl: { type: 'string', format: 'uri' },
                     metadata: { type: 'object' },
@@ -1225,7 +1226,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                     parentId: parentRing?.id,
                     curatorNote: data.curatorNote,
                     bannerUrl: data.bannerUrl,
-                    themeColor: data.themeColor,
+                    themeColor: data.themeColor ?? null, // not the column's old 'thread-pine' default
                     badgeImageUrl: data.badgeImageUrl,
                     badgeImageHighResUrl: data.badgeImageHighResUrl,
                     metadata: data.metadata,
@@ -1298,15 +1299,15 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                 type: 'object',
                 properties: {
                     name: { type: 'string', minLength: 1, maxLength: 100 },
-                    description: { type: 'string', maxLength: 500 },
+                    description: { type: ['string', 'null'], maxLength: 500 },
                     shortCode: { type: 'string', minLength: 2, maxLength: 10, pattern: '^[a-zA-Z0-9-]+$' },
                     visibility: { type: 'string', enum: ['PUBLIC', 'UNLISTED', 'PRIVATE'] },
                     joinPolicy: { type: 'string', enum: ['OPEN', 'APPLICATION', 'INVITATION', 'CLOSED'] },
                     postPolicy: { type: 'string', enum: ['OPEN', 'MEMBERS', 'CURATED', 'CLOSED'] },
                     parentSlug: { type: 'string' },
-                    curatorNote: { type: 'string', maxLength: 1000 },
-                    bannerUrl: { type: 'string', format: 'uri' },
-                    themeColor: { type: 'string' },
+                    curatorNote: { type: ['string', 'null'], maxLength: 1000 },
+                    bannerUrl: { type: ['string', 'null'], format: 'uri' },
+                    themeColor: { type: ['string', 'null'], pattern: THEME_COLOR },
                     badgeImageUrl: { type: 'string', format: 'uri' },
                     badgeImageHighResUrl: { type: 'string', format: 'uri' },
                     metadata: { type: 'object' },
@@ -1417,7 +1418,13 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                 newParentId = parentRing.id;
             }
 
-            // Update the ring
+            // metadata replaces the stored one, but a fork keeps its lineage
+            const lineage = Object.fromEntries(
+                Object.entries((ring.metadata ?? {}) as Record<string, unknown>)
+                    .filter(([key]) => key === 'forkedFrom' || key === 'forkedAt')
+            );
+
+            // Update the ring (undefined leaves a field as it is, null clears it)
             const updatedRing = await prisma.ring.update({
                 where: { slug },
                 data: {
@@ -1433,7 +1440,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                     themeColor: data.themeColor,
                     badgeImageUrl: data.badgeImageUrl,
                     badgeImageHighResUrl: data.badgeImageHighResUrl,
-                    metadata: data.metadata,
+                    metadata: data.metadata && { ...data.metadata, ...lineage },
                     policies: data.policies,
                     updatedAt: new Date(),
                 },
@@ -1666,6 +1673,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                     ownerDid: actorDid,
                     parentId: parentRing.id,
                     curatorNote: data.curatorNote,
+                    themeColor: null,
                     badgeImageUrl: data.badgeImageUrl,
                     badgeImageHighResUrl: data.badgeImageHighResUrl,
                     metadata: {
