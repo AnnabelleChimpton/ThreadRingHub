@@ -2414,7 +2414,8 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                             badgeId: { not: null } // Only update existing badges
                         },
                         include: {
-                            role: { select: { name: true } }
+                            role: { select: { name: true } },
+                            badge: { select: { id: true, badgeData: true, issuedAt: true } },
                         }
                     });
 
@@ -2423,7 +2424,9 @@ export async function ringsRoutes(fastify: FastifyInstance) {
 
                     for (const membership of memberships) {
                         try {
-                            // Generate new badge with updated images
+                            // Re-sign with the new images, keeping the badge's id
+                            // (GET /trp/badges/:id finds it by that) and its date.
+                            const stored = membership.badge;
                             const newBadge = await generateBadge(
                                 ring.slug,
                                 ring.name,
@@ -2432,7 +2435,11 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                                 RING_HUB_PRIVATE_KEY,
                                 config.hubUrl,
                                 updatedRing.badgeImageUrl || undefined,
-                                updatedRing.badgeImageHighResUrl || undefined
+                                updatedRing.badgeImageHighResUrl || undefined,
+                                stored ? {
+                                    id: stored.id,
+                                    issuanceDate: (stored.badgeData as any)?.issuanceDate ?? stored.issuedAt.toISOString(),
+                                } : undefined
                             );
 
                             // Update badge in database
@@ -2456,7 +2463,6 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                                             }
                                         })
                                     },
-                                    issuedAt: new Date() // Update issued date
                                 }
                             });
 

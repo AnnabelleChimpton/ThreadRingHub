@@ -48,7 +48,9 @@ export interface ThreadRingBadge {
 }
 
 /**
- * Generate a cryptographically signed badge for ring membership
+ * Generate a cryptographically signed badge for ring membership. Pass
+ * `reissue` (the stored credential's id and issuanceDate) to re-sign an
+ * existing badge: it keeps its id, so its own link still resolves, and its date.
  */
 export async function generateBadge(
   ringSlug: string,
@@ -58,10 +60,10 @@ export async function generateBadge(
   privateKey: crypto.KeyObject,
   ringHubUrl: string,
   badgeImageUrl?: string,
-  badgeImageHighResUrl?: string
+  badgeImageHighResUrl?: string,
+  reissue?: { id: string; issuanceDate: string }
 ): Promise<ThreadRingBadge> {
-  const badgeId = nanoid();
-  const issuanceDate = new Date().toISOString();
+  const issuanceDate = reissue?.issuanceDate ?? new Date().toISOString();
   const issuerDid = `did:web:${new URL(ringHubUrl).hostname}`;
 
   const badge: Omit<ThreadRingBadge, 'proof'> = {
@@ -70,7 +72,7 @@ export async function generateBadge(
       'https://purl.imsglobal.org/spec/ob/v3p0/context.json',
       'https://threadring.org/contexts/v1'
     ],
-    id: `${ringHubUrl}/trp/badges/${badgeId}`,
+    id: reissue?.id ?? `${ringHubUrl}/trp/badges/${nanoid()}`,
     type: ['VerifiableCredential', 'OpenBadgeCredential', 'ThreadRingMembershipBadge'],
     issuer: {
       id: issuerDid,
