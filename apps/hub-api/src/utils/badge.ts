@@ -70,7 +70,7 @@ export async function generateBadge(
       'https://purl.imsglobal.org/spec/ob/v3p0/context.json',
       'https://threadring.org/contexts/v1'
     ],
-    id: `${ringHubUrl}/badges/${badgeId}`,
+    id: `${ringHubUrl}/trp/badges/${badgeId}`,
     type: ['VerifiableCredential', 'OpenBadgeCredential', 'ThreadRingMembershipBadge'],
     issuer: {
       id: issuerDid,

@@ -121,6 +121,7 @@ model Membership {
   // Application/leave details
   applicationMessage String? // Message when applying to join
   leaveReason       String? // Reason for leaving
+  removedBy         String? // DID of the owner/moderator who removed them; null if they left on their own
 
   // Badge relation (one-to-one)
   badgeId   String?  @unique

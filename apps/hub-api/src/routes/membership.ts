@@ -23,6 +23,13 @@ import { RING_HUB_PRIVATE_KEY, ephemeralBadgeIssuanceBlock } from '../utils/sign
 
 const RING_HUB_URL = config.hubUrl;
 
+/**
+ * Badge rows are keyed by the credential id, a full URL: `<hub>/trp/badges/<id>`,
+ * or `<hub>/badges/<id>` for badges issued before 2026-10 (signed, so it stays).
+ * The badge routes take the short id, or the whole credential id encoded.
+ */
+const badgeIdsFor = (id: string) => [id, `${RING_HUB_URL}/trp/badges/${id}`, `${RING_HUB_URL}/badges/${id}`];
+
 export async function membershipRoutes(fastify: FastifyInstance) {
   // Add security middleware to all routes
   fastify.addHook('preHandler', auditLogger);
@@ -133,11 +140,14 @@ export async function membershipRoutes(fastify: FastifyInstance) {
         instanceUrl: actorProfile?.instanceDomain,
       });
 
-      // Check join policy
+      // Check join policy. A member the owner or a moderator removed comes
+      // back only by invitation; one who left on their own rejoins as anyone.
+      const removed = !!existingMembership?.removedBy;
+      const joinPolicy = removed && ring.joinPolicy !== 'CLOSED' ? 'INVITATION' : ring.joinPolicy;
       let membershipStatus = 'PENDING';
       let requiresApproval = false;
 
-      switch (ring.joinPolicy) {
+      switch (joinPolicy) {
         case 'OPEN':
           membershipStatus = 'ACTIVE';
           break;
@@ -157,7 +167,10 @@ export async function membershipRoutes(fastify: FastifyInstance) {
           });
 
           if (!invitation) {
-            reply.code(403).send({
+            reply.code(403).send(removed ? {
+              error: 'Removed',
+              message: 'You were removed from this ring. You can come back if the owner or a moderator invites you.',
+            } : {
               error: 'Invitation required',
               message: 'This ring requires an invitation to join',
             });
@@ -219,6 +232,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
           joinedAt: membershipStatus === 'ACTIVE' ? new Date() : null,
           applicationMessage: (message || null) as any,
           metadata: (metadata || {}) as any,
+          removedBy: null,
           ...profileData,
         },
         create: {
@@ -306,7 +320,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
         },
         badge: badge ? {
           id: badge.id,
-          url: `${RING_HUB_URL}/badges/${badge.id}`,
+          url: badge.id,
         } : null,
         message: requiresApproval
           ? 'Application submitted for review'
@@ -638,8 +652,8 @@ export async function membershipRoutes(fastify: FastifyInstance) {
     try {
       const { id } = request.params;
 
-      const badge = await prisma.badge.findUnique({
-        where: { id },
+      const badge = await prisma.badge.findFirst({
+        where: { id: { in: badgeIdsFor(id) } },
         include: {
           membership: {
             include: {
@@ -659,7 +673,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
       }
 
       // Check if badge is revoked
-      const isRevoked = await isBadgeRevoked(id) || badge.revokedAt !== null;
+      const isRevoked = await isBadgeRevoked(badge.id) || badge.revokedAt !== null;
 
       reply.send({
         badge: badge.badgeData,
@@ -703,8 +717,8 @@ export async function membershipRoutes(fastify: FastifyInstance) {
     try {
       const { id } = request.params;
 
-      const badge = await prisma.badge.findUnique({
-        where: { id },
+      const badge = await prisma.badge.findFirst({
+        where: { id: { in: badgeIdsFor(id) } },
       });
 
       if (!badge) {
@@ -716,7 +730,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
       }
 
       // Check if badge is revoked
-      const isRevoked = await isBadgeRevoked(id) || badge.revokedAt !== null;
+      const isRevoked = await isBadgeRevoked(badge.id) || badge.revokedAt !== null;
 
       if (isRevoked) {
         reply.send({

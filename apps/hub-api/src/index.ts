@@ -162,6 +162,12 @@ async function buildApp() {
     return reply.redirect('/docs');
   });
 
+  // Badges issued before 2026-10 carry /badges/:id inside their signed
+  // credential, so that id can't change; the route itself lives under /trp.
+  fastify.get<{ Params: { id: string } }>('/badges/:id', async (request, reply) => {
+    return reply.redirect(301, `/trp/badges/${encodeURIComponent(request.params.id)}`);
+  });
+
   // Health check endpoints
   fastify.get('/health', async () => {
     return { status: 'ok', timestamp: new Date().toISOString() };

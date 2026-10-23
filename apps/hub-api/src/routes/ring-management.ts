@@ -306,12 +306,15 @@ export async function ringManagementRoutes(fastify: FastifyInstance) {
                 return reply.code(404).send({ error: 'Ring not found' });
             }
 
-            // Check if requestor is owner
-            const requestorMembership = ring.memberships.find(m => m.actorDid === requestorDid);
-            if (!requestorMembership || requestorMembership.role?.name !== 'owner') {
+            // The owner removes anyone but themselves; a moderator removes
+            // plain members only. Role names, like /invite: moderator
+            // deliberately lacks manage_members (see default-roles.ts).
+            const requestorRole = ring.memberships.find(m => m.actorDid === requestorDid)?.role?.name;
+            const byOwner = requestorDid === ring.ownerDid || requestorRole === 'owner';
+            if (!byOwner && requestorRole !== 'moderator') {
                 return reply.code(403).send({
                     error: 'Forbidden',
-                    message: 'Only ring owner can remove members'
+                    message: 'Only the ring owner or a moderator can remove members'
                 });
             }
 
@@ -325,21 +328,43 @@ export async function ringManagementRoutes(fastify: FastifyInstance) {
             }
 
             // Prevent removing owner
-            if (targetMembership.role?.name === 'owner') {
+            const targetRole = targetMembership.role?.name;
+            if (actorDid === ring.ownerDid || targetRole === 'owner') {
                 return reply.code(403).send({
                     error: 'Forbidden',
                     message: 'Cannot remove ring owner'
                 });
             }
+            if (!byOwner && targetRole === 'moderator') {
+                return reply.code(403).send({
+                    error: 'Forbidden',
+                    message: 'Only the ring owner can remove a moderator'
+                });
+            }
 
-            // Update membership status to REVOKED instead of deleting
-            await prisma.membership.update({
-                where: { id: targetMembership.id },
-                data: {
-                    status: 'REVOKED',
-                    leftAt: new Date()
-                }
-            });
+            // REVOKED like a leave, but removedBy keeps them from rejoining an
+            // open ring on their own (/trp/join asks for an invitation).
+            const removedAt = new Date();
+            await prisma.$transaction([
+                prisma.membership.update({
+                    where: { id: targetMembership.id },
+                    data: { status: 'REVOKED', leftAt: removedAt, removedBy: requestorDid }
+                }),
+                prisma.badge.updateMany({
+                    where: { membershipId: targetMembership.id, revokedAt: null },
+                    data: { revokedAt: removedAt, revocationReason: 'Removed from ring' }
+                }),
+                prisma.auditLog.create({
+                    data: {
+                        ringId: ring.id,
+                        action: 'membership.removed',
+                        actorDid: requestorDid,
+                        targetDid: actorDid,
+                        metadata: { membershipId: targetMembership.id, role: targetRole, byRole: byOwner ? 'owner' : 'moderator' },
+                        timestamp: removedAt
+                    }
+                }),
+            ]);
 
             logger.info({
                 ringSlug: slug,
