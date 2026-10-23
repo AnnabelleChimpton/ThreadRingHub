@@ -263,6 +263,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
     Params: { slug: string };
     Querystring: PostQueryInput
   }>('/rings/:slug/feed', {
+    preHandler: [authenticateActor],
     schema: {
       params: {
         type: 'object',
@@ -417,31 +418,19 @@ export async function contentRoutes(fastify: FastifyInstance) {
         ringId: ringIds.length === 1 ? ringIds[0] : { in: ringIds }
       };
 
-      // Show posts based on authentication and membership
-      if (!request.actor) {
-        // Non-authenticated users only see accepted posts
-        where.status = 'ACCEPTED';
-      } else {
-        // For scope other than 'ring', check membership of the requested ring
-        // For 'ring' scope, check membership of the specific ring
-        let membershipCheckRingId = ring.id;
-
+      // Accepted posts only, unless a member of this ring asks its own feed
+      // for another status: callers read this as the ring's feed, members
+      // included.
+      where.status = 'ACCEPTED';
+      if (status && scope === 'ring' && request.actor) {
         const membership = await prisma.membership.findFirst({
           where: {
-            ringId: membershipCheckRingId,
+            ringId: ring.id,
             actorDid: request.actor.did,
             status: 'ACTIVE',
           },
         });
-
-        if (membership) {
-          // Members can see all posts for moderation, unless status filter specified
-          if (status) where.status = status;
-          // Otherwise show all posts (PENDING, ACCEPTED, REJECTED)
-        } else {
-          // Non-members only see accepted posts
-          where.status = 'ACCEPTED';
-        }
+        if (membership) where.status = status;
       }
 
       if (actorDid) {

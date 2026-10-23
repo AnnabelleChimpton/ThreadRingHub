@@ -1777,6 +1777,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
      * GET /trp/rings/:slug/lineage - Get ring genealogy
      */
     fastify.get<{ Params: { slug: string } }>('/rings/:slug/lineage', {
+        preHandler: [authenticateActor],
         schema: {
             params: {
                 type: 'object',
@@ -1930,6 +1931,7 @@ export async function ringsRoutes(fastify: FastifyInstance) {
         Params: { slug: string };
         Querystring: MemberQueryInput
     }>('/rings/:slug/members', {
+        preHandler: [authenticateActor],
         schema: {
             params: {
                 type: 'object',
@@ -1967,13 +1969,24 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                 return;
             }
 
-            // Check if ring is private and user has access
-            if (ring.visibility === 'PRIVATE' && !request.actor) {
-                reply.code(404).send({
-                    error: 'Not found',
-                    message: 'Ring not found',
+            // A PRIVATE ring's members are seen only by its ACTIVE members
+            if (ring.visibility === 'PRIVATE') {
+                const membership = request.actor && await prisma.membership.findFirst({
+                    where: {
+                        ringId: ring.id,
+                        actorDid: request.actor.did,
+                        status: 'ACTIVE',
+                    },
+                    select: { id: true },
                 });
-                return;
+
+                if (!membership) {
+                    reply.code(404).send({
+                        error: 'Not found',
+                        message: 'Ring not found',
+                    });
+                    return;
+                }
             }
 
             const where: any = { ringId: ring.id };

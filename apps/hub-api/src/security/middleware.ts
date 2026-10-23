@@ -426,6 +426,12 @@ function isPublicEndpoint(url: string, method?: string): boolean {
     if (url.match(/^\/trp\/rings\/[^\/]+$/)) {
       return true; // GET /trp/rings/{slug} is public
     }
+
+    // A ring's feed, members and lineage: signed callers are recognised (a
+    // private ring's members read it), unsigned ones read public rings.
+    if (url.match(/^\/trp\/rings\/[^\/?]+\/(feed|members|lineage)(\?|$)/)) {
+      return true;
+    }
   }
 
   return false;
