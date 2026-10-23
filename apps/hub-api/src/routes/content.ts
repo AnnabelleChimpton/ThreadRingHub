@@ -30,6 +30,46 @@ function buildPostResponse(postRef: any): PostResponse {
   };
 }
 
+// POST /trp/submit answers 201 for a new PostRef and 200 for its author's
+// edit, both in this shape.
+const submitResponse = {
+  type: 'object',
+  properties: {
+    post: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        ringSlug: { type: 'string' },
+        uri: { type: 'string' },
+        digest: { type: 'string' },
+        actorDid: { type: 'string' },
+        submittedBy: { type: 'string' },
+        submittedAt: { type: 'string', format: 'date-time' },
+        status: { type: 'string', enum: ['PENDING', 'ACCEPTED'] },
+        moderatedAt: { type: 'string', format: 'date-time', nullable: true },
+        moderatedBy: { type: 'string', nullable: true },
+        moderationNote: { type: 'string', nullable: true },
+        pinned: { type: 'boolean' },
+        metadata: {
+          type: 'object',
+          nullable: true,
+          properties: {
+            title: { type: 'string' },
+            textPreview: { type: 'string' },
+            excerpt: { type: 'string' },
+            tags: { type: 'array', items: { type: 'string' } },
+            publishedAt: { type: 'string', format: 'date-time' },
+            platform: { type: 'string' },
+          },
+          additionalProperties: true,
+        },
+      },
+    },
+    message: { type: 'string' },
+    requiresApproval: { type: 'boolean' },
+  },
+};
+
 export async function contentRoutes(fastify: FastifyInstance) {
   // Add security middleware to all routes
   fastify.addHook('preHandler', auditLogger);
@@ -74,43 +114,8 @@ export async function contentRoutes(fastify: FastifyInstance) {
         // Must mirror the handler's send shape exactly: Fastify serializes
         // through this schema and silently DROPS undeclared properties (a
         // flat schema here once reduced the whole body to `{}` on the wire).
-        201: {
-          type: 'object',
-          properties: {
-            post: {
-              type: 'object',
-              properties: {
-                id: { type: 'string' },
-                ringSlug: { type: 'string' },
-                uri: { type: 'string' },
-                digest: { type: 'string' },
-                actorDid: { type: 'string' },
-                submittedBy: { type: 'string' },
-                submittedAt: { type: 'string', format: 'date-time' },
-                status: { type: 'string', enum: ['PENDING', 'ACCEPTED'] },
-                moderatedAt: { type: 'string', format: 'date-time', nullable: true },
-                moderatedBy: { type: 'string', nullable: true },
-                moderationNote: { type: 'string', nullable: true },
-                pinned: { type: 'boolean' },
-                metadata: {
-                  type: 'object',
-                  nullable: true,
-                  properties: {
-                    title: { type: 'string' },
-                    textPreview: { type: 'string' },
-                    excerpt: { type: 'string' },
-                    tags: { type: 'array', items: { type: 'string' } },
-                    publishedAt: { type: 'string', format: 'date-time' },
-                    platform: { type: 'string' },
-                  },
-                  additionalProperties: true,
-                },
-              },
-            },
-            message: { type: 'string' },
-            requiresApproval: { type: 'boolean' },
-          },
-        },
+        200: submitResponse,
+        201: submitResponse,
       },
     },
   }, async (request, reply) => {
@@ -139,6 +144,44 @@ export async function contentRoutes(fastify: FastifyInstance) {
         reply.code(404).send({
           error: 'Not found',
           message: 'Ring not found',
+        });
+        return;
+      }
+
+      const existingPost = await prisma.postRef.findFirst({
+        where: {
+          ringId: ring.id,
+          uri,
+        },
+      });
+
+      // Its author re-submitting a post that's in the ring is an edit
+      // (ThreadStead sends the same uri with fresh metadata): update it, whatever
+      // the post policy says now. A post taken out (REMOVED, REJECTED) stays out.
+      if (existingPost && existingPost.actorDid === contentAuthorDid
+        && (existingPost.status === 'ACCEPTED' || existingPost.status === 'PENDING')) {
+        const postRef = await prisma.postRef.update({
+          where: { id: existingPost.id },
+          data: { digest, metadata },
+          include: {
+            ring: { select: { slug: true } },
+          },
+        });
+
+        await prisma.auditLog.create({
+          data: {
+            ringId: ring.id,
+            action: 'content.updated',
+            actorDid: submitterDid,
+            targetDid: contentAuthorDid !== submitterDid ? contentAuthorDid : null,
+            metadata: { postId: postRef.id, uri, digest },
+          },
+        });
+
+        reply.code(200).send({
+          post: buildPostResponse(postRef),
+          message: 'Content updated',
+          requiresApproval: postRef.status === 'PENDING',
         });
         return;
       }
@@ -180,14 +223,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
           break;
       }
 
-      // Check for duplicate submissions
-      const existingPost = await prisma.postRef.findFirst({
-        where: {
-          ringId: ring.id,
-          uri,
-        },
-      });
-
+      // Anyone else's re-submit, or a post taken out, is a duplicate
       if (existingPost) {
         reply.code(409).send({
           error: 'Duplicate submission',
