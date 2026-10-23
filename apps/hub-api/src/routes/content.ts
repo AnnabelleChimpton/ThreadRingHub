@@ -117,6 +117,17 @@ export async function contentRoutes(fastify: FastifyInstance) {
     try {
       const { ringSlug, uri, digest, actorDid, metadata } = request.body;
       const submitterDid = request.actor!.did;
+
+      // The author is whoever signed. Only a hub admin (an instance posting
+      // for one of its users) may name someone else; anyone else naming
+      // another DID is refused rather than silently re-attributed.
+      if (actorDid && actorDid !== submitterDid && !request.actor!.isAdmin) {
+        reply.code(403).send({
+          error: 'Forbidden',
+          message: 'actorDid must match the signing actor',
+        });
+        return;
+      }
       const contentAuthorDid = actorDid || submitterDid;
 
       // Find the ring
