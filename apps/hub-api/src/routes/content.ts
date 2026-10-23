@@ -393,6 +393,25 @@ export async function contentRoutes(fastify: FastifyInstance) {
         ringIds = familyIds;
       }
 
+      // Related rings count only where the caller could open them, as in
+      // lineage's canSeeRing: PUBLIC and UNLISTED for anyone, PRIVATE for its
+      // ACTIVE members.
+      if (scope !== 'ring' && ringIds.length > 0) {
+        const visible = await prisma.ring.findMany({
+          where: {
+            id: { in: ringIds },
+            OR: [
+              { visibility: { in: ['PUBLIC', 'UNLISTED'] } },
+              ...(request.actor
+                ? [{ memberships: { some: { actorDid: request.actor.did, status: 'ACTIVE' as const } } }]
+                : []),
+            ],
+          },
+          select: { id: true },
+        });
+        ringIds = visible.map(r => r.id);
+      }
+
       // Build query filters
       const where: any = {
         ringId: ringIds.length === 1 ? ringIds[0] : { in: ringIds }
