@@ -10,6 +10,7 @@ import {
     requirePermission,
     auditLogger
 } from '../security/middleware';
+import { verifyHttpSignature } from '../security/http-signature';
 import { rateLimit, recordRateLimitUsage } from '../middleware/rate-limit';
 import {
     type CreateRingInput,
@@ -989,24 +990,23 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                 return;
             }
 
-            // Check visibility permissions
-            if (ring.visibility === 'PRIVATE' && !request.actor) {
-                reply.code(404).send({
-                    error: 'Not found',
-                    message: 'Ring not found',
-                });
-                return;
-            }
-
-            if (ring.visibility === 'PRIVATE' && request.actor) {
-                // Check if user is a member
-                const membership = await prisma.membership.findFirst({
-                    where: {
-                        ringId: ring.id,
-                        actorDid: request.actor.did,
-                        status: 'ACTIVE',
-                    },
-                });
+            // A PRIVATE ring is seen only by its ACTIVE members. This route is
+            // public and runs no authenticateActor, so the signature is checked
+            // here, and only for private rings: reading a public ring never
+            // depends on the caller's key.
+            let memberDid: string | undefined;
+            if (ring.visibility === 'PRIVATE') {
+                const signature = await verifyHttpSignature(request);
+                const membership = signature.valid && signature.actorDid
+                    ? await prisma.membership.findFirst({
+                        where: {
+                            ringId: ring.id,
+                            actorDid: signature.actorDid,
+                            status: 'ACTIVE',
+                        },
+                        select: { actorDid: true },
+                    })
+                    : null;
 
                 if (!membership) {
                     reply.code(404).send({
@@ -1015,9 +1015,10 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                     });
                     return;
                 }
+                memberDid = membership.actorDid;
             }
 
-            const response = await buildRingResponse(ring, true, true, request.actor?.did);
+            const response = await buildRingResponse(ring, true, true, memberDid);
             reply.send(response);
         } catch (error) {
             logger.error({ error }, 'Failed to get ring details');
@@ -1472,7 +1473,9 @@ export async function ringsRoutes(fastify: FastifyInstance) {
     });
 
     /**
-     * DELETE /trp/rings/:slug - Delete ring (soft delete)
+     * DELETE /trp/rings/:slug - Delete ring. A hard delete: memberships,
+     * badges, PostRefs, invitations, blocks and audit rows cascade with it.
+     * Answers 204 with no body.
      */
     fastify.delete<{ Params: { slug: string } }>('/rings/:slug', {
         preHandler: [
@@ -1511,15 +1514,35 @@ export async function ringsRoutes(fastify: FastifyInstance) {
                 return;
             }
 
-            // For now, we'll do a hard delete
-            // In production, implement soft delete
-            await prisma.ring.delete({
-                where: { slug },
-            });
+            if (ring.slug === config.rings.rootSlug) {
+                reply.code(400).send({
+                    error: 'Invalid operation',
+                    message: 'The root ring cannot be deleted',
+                });
+                return;
+            }
+
+            // Its forks move up to its parent (the root, for a ring that has
+            // none), so they stay in the lineage tree: the FK alone would
+            // leave them parentless.
+            const newParentId = ring.parentId ?? (await prisma.ring.findUnique({
+                where: { slug: config.rings.rootSlug },
+                select: { id: true },
+            }))?.id ?? null;
+            const [moved] = await prisma.$transaction([
+                prisma.ring.updateMany({
+                    where: { parentId: ring.id },
+                    data: { parentId: newParentId },
+                }),
+                prisma.ring.delete({
+                    where: { id: ring.id },
+                }),
+            ]);
 
             logger.info({
                 ringSlug: slug,
                 deletedBy: actorDid,
+                forksMoved: moved.count,
             }, 'Ring deleted');
 
             reply.code(204).send();
