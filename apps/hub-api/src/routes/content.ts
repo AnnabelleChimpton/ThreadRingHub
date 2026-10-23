@@ -659,10 +659,26 @@ export async function contentRoutes(fastify: FastifyInstance) {
         return;
       }
 
-      // Check permissions
+      // A ring's moderators act on this ring only, their own posts included
+      // (pinning them, or taking one out of just this ring). An author
+      // without moderation rights here can only take their post out of every
+      // ring at once.
+      const membership = await prisma.membership.findFirst({
+        where: {
+          ringId: postRef.ring.id,
+          actorDid: actorDid,
+          status: 'ACTIVE',
+        },
+        include: {
+          role: {
+            select: { permissions: true },
+          },
+        },
+      });
+      const canModerate = ((membership?.role?.permissions as string[]) || []).includes('moderate_posts');
       const isAuthor = postRef.actorDid === actorDid || postRef.submittedBy === actorDid;
 
-      if (isAuthor) {
+      if (isAuthor && !canModerate) {
         if (action !== 'remove') {
           reply.code(403).send({
             error: 'Forbidden',
@@ -750,20 +766,6 @@ export async function contentRoutes(fastify: FastifyInstance) {
         return;
       }
 
-      // Not author - check moderation permissions
-      const membership = await prisma.membership.findFirst({
-        where: {
-          ringId: postRef.ring.id,
-          actorDid: actorDid,
-          status: 'ACTIVE',
-        },
-        include: {
-          role: {
-            select: { permissions: true },
-          },
-        },
-      });
-
       if (!membership) {
         reply.code(403).send({
           error: 'Forbidden',
@@ -772,9 +774,7 @@ export async function contentRoutes(fastify: FastifyInstance) {
         return;
       }
 
-      // Check if member has moderate_posts permission
-      const permissions = (membership.role?.permissions as string[]) || [];
-      if (!permissions.includes('moderate_posts')) {
+      if (!canModerate) {
         reply.code(403).send({
           error: 'Forbidden',
           message: 'You do not have permission to moderate content in this ring',
