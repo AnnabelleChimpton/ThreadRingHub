@@ -257,7 +257,7 @@ export async function membershipRoutes(fastify: FastifyInstance) {
         logger.error({ ringSlug, actorDid }, issuanceBlock);
       } else if (membershipStatus === 'ACTIVE') {
         try {
-          badge = await generateBadge(
+          const issued = await generateBadge(
             ring.slug,
             ring.name,
             actorDid,
@@ -268,21 +268,21 @@ export async function membershipRoutes(fastify: FastifyInstance) {
             ring.badgeImageHighResUrl || undefined
           );
 
-          // Store badge reference
-          await prisma.membership.update({
-            where: { id: membership.id },
-            data: { badgeId: badge.id },
-          });
-
-          // Store badge in database
-          await prisma.badge.create({
-            data: {
-              id: badge.id,
-              membershipId: membership.id,
-              badgeData: badge as any,
-              issuedAt: new Date(),
-            },
-          });
+          // One badge row per membership: a rejoin replaces the old, revoked
+          // one (a plain create failed there, leaving a badge nothing served).
+          const issuedAt = new Date();
+          await prisma.$transaction([
+            prisma.badge.upsert({
+              where: { membershipId: membership.id },
+              create: { id: issued.id, membershipId: membership.id, badgeData: issued as any, issuedAt },
+              update: { id: issued.id, badgeData: issued as any, issuedAt, revokedAt: null, revocationReason: null },
+            }),
+            prisma.membership.update({
+              where: { id: membership.id },
+              data: { badgeId: issued.id },
+            }),
+          ]);
+          badge = issued;
         } catch (error) {
           logger.error({ error, ringSlug, actorDid }, 'Failed to generate badge');
           // Continue without badge - don't fail the join

@@ -209,6 +209,20 @@ describe('badge URLs', () => {
         expect(verified.json().isValid).toBe(true);
     });
 
+    test('rejoining issues a fresh badge that is stored and served', async () => {
+        const ring = await makeRing('removal-rejoin-badge');
+        await prisma.membership.delete({ where: { ringId_actorDid: { ringId: ring.id, actorDid: MEMBER } } });
+        const first = await join(ring.slug, MEMBER);
+        await leave(ring.slug, MEMBER);
+
+        const again = await join(ring.slug, MEMBER);
+        expect(again.body.badge.id).not.toBe(first.body.badge.id);
+        const served = await app.inject({ method: 'GET', url: new URL(again.body.badge.url).pathname });
+        expect(served.statusCode).toBe(200);
+        expect(served.json().metadata.isRevoked).toBe(false);
+        expect((await membershipOf(ring.id, MEMBER)).badgeId).toBe(again.body.badge.id);
+    });
+
     test('a badge issued under the old /badges/:id credential id is served by its short id', async () => {
         const ring = await makeRing('removal-old-badge');
         const membership = await membershipOf(ring.id, MEMBER);
