@@ -36,8 +36,10 @@ fi
 step "Checking docker-compose.yml"
 docker compose config -q
 
-step "Building the $SERVICE image"
-docker compose build "$SERVICE"
+step "Building the $SERVICE image (with the newest node:24-slim, for Node security fixes)"
+# --pull: without it Docker reuses whatever base image it pulled first, which
+# left the hub on Node 24.6.0 from 2025-08 until 2026-10.
+docker compose build --pull "$SERVICE"
 
 step "Applying database migrations (with the new image, before the swap)"
 docker compose run --rm --no-deps "$SERVICE" npx prisma migrate deploy
