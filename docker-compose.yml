@@ -9,11 +9,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-ringhub}
       # Secret: no default. Provide via the gitignored .env next to this file.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_HOST_AUTH_METHOD: trust
+      # No POSTGRES_HOST_AUTH_METHOD: the image's default makes every network
+      # connection give the password (scram-sha-256). `trust` here would let a
+      # freshly made volume accept anyone, password or not.
     ports:
-      # Localhost-only: with trust auth, a public 5432 is a passwordless
-      # database open to the internet. Docker published ports bypass most
-      # host firewalls, so the binding itself must be loopback.
+      # Localhost-only: Docker published ports bypass most host firewalls,
+      # so the binding itself must be loopback.
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -118,8 +119,9 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
-  # Adminer for database management (development only)
+  # Adminer for database management. Not started with the rest: `docker compose --profile tools up -d adminer`
   adminer:
+    profiles: ["tools"]
     image: adminer:4-standalone
     container_name: ringhub-adminer
     restart: unless-stopped
@@ -131,8 +133,9 @@ services:
       ADMINER_DEFAULT_SERVER: postgres
       ADMINER_DESIGN: "dracula"
 
-  # Redis Commander for cache management (development only)
+  # Redis Commander for cache management. Not started with the rest: `docker compose --profile tools up -d redis-commander`
   redis-commander:
+    profiles: ["tools"]
     image: rediscommander/redis-commander:latest
     container_name: ringhub-redis-commander
     restart: unless-stopped
