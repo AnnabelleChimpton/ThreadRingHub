@@ -193,56 +193,6 @@ export async function setActorTrust(
 }
 
 /**
- * Register a public key for an actor
- */
-export async function registerActorKey(
-  actorDid: string,
-  keyId: string,
-  publicKey: string
-): Promise<boolean> {
-  try {
-    // Verify the actor owns this key by checking their DID document
-    const didDocument = await resolveDID(actorDid);
-    if (!didDocument) {
-      logger.warn({ actorDid, keyId }, 'Cannot verify key ownership - DID not resolvable');
-      return false;
-    }
-
-    // Check if the key is in the DID document
-    const keyExists = didDocument.verificationMethod?.some(vm =>
-      vm.id === keyId || vm.id.endsWith(`#${keyId}`)
-    );
-
-    if (!keyExists) {
-      logger.warn({ actorDid, keyId }, 'Key not found in DID document');
-      return false;
-    }
-
-    // Store the key
-    await prisma.httpSignature.upsert({
-      where: { keyId },
-      update: {
-        publicKey,
-        actorDid,
-        lastUsed: new Date(),
-      },
-      create: {
-        keyId,
-        publicKey,
-        actorDid,
-        trusted: false, // Keys start untrusted
-      },
-    });
-
-    logger.info({ actorDid, keyId }, 'Actor key registered');
-    return true;
-  } catch (error) {
-    logger.error({ error, actorDid, keyId }, 'Failed to register actor key');
-    return false;
-  }
-}
-
-/**
  * Get all actors with pagination
  */
 export async function listActors(options: {

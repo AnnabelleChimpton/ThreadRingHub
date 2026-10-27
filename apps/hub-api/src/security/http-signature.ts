@@ -341,6 +341,11 @@ function validateDigest(request: FastifyRequest): boolean {
  * lapsed, the DID document is re-resolved and the row updated with the fresh
  * key. If re-resolution fails (e.g. the DID doc is unreachable) we fall back to
  * the stale cached key rather than hard-failing authentication.
+ *
+ * A row with no expiry, or one further out than the TTL, wasn't written by
+ * this code (old rows, or rows written by hand: the database was reachable
+ * from the internet until 2026-07). It's re-resolved like an expired one, with
+ * no fallback to its key.
  */
 async function fetchPublicKey(keyId: string): Promise<string | null> {
   try {
@@ -357,7 +362,9 @@ async function fetchPublicKey(keyId: string): Promise<string | null> {
     }
 
     if (cached) {
-      const expired = cached.expiresAt != null && cached.expiresAt.getTime() < Date.now();
+      const now = Date.now();
+      const untrusted = cached.expiresAt == null || cached.expiresAt.getTime() > now + KEY_CACHE_TTL_MS;
+      const expired = untrusted || cached.expiresAt!.getTime() < now;
 
       if (expired) {
         logger.info({ keyId, expiresAt: cached.expiresAt }, 'Cached key expired — re-resolving DID document');
@@ -367,6 +374,10 @@ async function fetchPublicKey(keyId: string): Promise<string | null> {
             logger.warn({ keyId }, 'Cached key rotated on TTL refresh — swapped to newly resolved key');
           }
           return fresh;
+        }
+        if (untrusted) {
+          logger.warn({ keyId, reason: 'untrusted_cache_row' }, 'Could not re-resolve a cached key with no believable expiry — refusing it');
+          return null;
         }
         // Re-resolution failed (DID doc unreachable). Fall back to the stale
         // cached key so a transient outage doesn't lock out the client.
@@ -498,14 +509,9 @@ export async function verifyHttpSignature(
       headers: components.headers
     }, 'Verifying signature with details');
 
-    // Verify signature
-    // Get actor DID from key BEFORE verification (so it's available even if verification fails)
-    const key = await prisma.httpSignature.findUnique({
-      where: { keyId: components.keyId },
-      select: { actorDid: true },
-    });
-
-    const actorDid = key?.actorDid || components.keyId.split('#')[0];
+    // The signer is the DID the key belongs to, read from the keyId itself and
+    // never from the cache row (a row's actorDid could have been written by hand)
+    const actorDid = components.keyId.split('#')[0];
 
     let usedPublicKey = publicKey;
     let valid = await verifyEd25519Signature(
@@ -549,7 +555,6 @@ export async function verifyHttpSignature(
     logger.info({
       keyId: components.keyId,
       actorDid,
-      fromCache: !!key?.actorDid
     }, 'HTTP signature verification successful');
 
     return {
